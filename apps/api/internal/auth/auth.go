@@ -4,11 +4,13 @@ package auth
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
+	"google.golang.org/api/option"
 )
 
 // Identity is what a verified token tells us about the caller.
@@ -25,8 +27,10 @@ type Verifier interface {
 
 // Firebase verifies Firebase ID tokens. It initialises lazily.
 //
-// Credentials come from GOOGLE_APPLICATION_CREDENTIALS in production. When FIREBASE_AUTH_EMULATOR_HOST is set,
-// the Admin SDK talks to the local Auth emulator and needs no credentials, only the project id.
+// Credentials, in order of precedence:
+//   - FIREBASE_CREDENTIALS_JSON: the service account JSON itself (for hosts whose secrets are env vars).
+//   - GOOGLE_APPLICATION_CREDENTIALS: path to the service account file.
+//   - FIREBASE_AUTH_EMULATOR_HOST: no credentials needed; the Admin SDK talks to the local emulator.
 type Firebase struct {
 	projectID string
 	once      sync.Once
@@ -42,7 +46,11 @@ func (f *Firebase) init(ctx context.Context) {
 	if f.projectID != "" {
 		conf = &firebase.Config{ProjectID: f.projectID}
 	}
-	app, err := firebase.NewApp(ctx, conf)
+	var opts []option.ClientOption
+	if raw := os.Getenv("FIREBASE_CREDENTIALS_JSON"); raw != "" {
+		opts = append(opts, option.WithCredentialsJSON([]byte(raw)))
+	}
+	app, err := firebase.NewApp(ctx, conf, opts...)
 	if err != nil {
 		f.err = err
 		return

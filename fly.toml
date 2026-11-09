@@ -1,0 +1,47 @@
+# Fly.io configuration. One machine, one volume: SQLite needs a single writer.
+# First deploy: see docs/DEPLOY.md.
+
+app = "wcs-workshops"
+primary_region = "iad"
+
+[build]
+  # Firebase web config (public). Fill in from Firebase console > Project settings > Your apps.
+  [build.args]
+    VITE_FIREBASE_API_KEY = ""
+    VITE_FIREBASE_AUTH_DOMAIN = ""
+    VITE_FIREBASE_PROJECT_ID = ""
+    VITE_FIREBASE_APP_ID = ""
+    VITE_FIREBASE_MESSAGING_SENDER_ID = ""
+
+[env]
+  DATABASE_PATH = "/data/wcs.db"
+  FIREBASE_PROJECT_ID = ""
+  VIMEO_PRIVACY = "unlisted"
+  # Only the Capacitor shells are cross-origin; the web app is served by this binary.
+  CORS_ORIGINS = "capacitor://localhost,http://localhost"
+
+# Secrets, set with `fly secrets set`: VIMEO_ACCESS_TOKEN, FIREBASE_CREDENTIALS_JSON
+
+[[mounts]]
+  source = "wcs_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep exactly one machine running: SQLite on a volume cannot be shared.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
