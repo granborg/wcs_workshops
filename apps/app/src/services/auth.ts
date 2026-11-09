@@ -154,7 +154,9 @@ const webAuth: AuthService = {
     const { auth } = await webUI()
     await authReady(auth)
     const token = await auth.currentUser?.getIdToken()
-    return token ? { Authorization: `Bearer ${token}` } : {}
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    return headers
   },
 }
 
