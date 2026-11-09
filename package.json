@@ -4,15 +4,15 @@
   "version": "0.1.0",
   "description": "Creators share video collections with viewers through QR codes. Vue 3 + Capacitor app, Go API, Vimeo hosting.",
   "workspaces": [
-    "apps/app",
-    "packages/shared"
+    "apps/app"
   ],
   "scripts": {
-    "dev:app": "npm run dev -w apps/app",
+    "dev:auth": "npx -y firebase-tools emulators:start --only auth --project demo-wcs",
     "dev:api": "go run -C apps/api ./cmd/api",
+    "dev:app": "npm run dev -w apps/app",
+    "build": "node scripts/build.mjs",
     "test:api": "go test -C apps/api ./...",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck -w apps/app",
     "cap:sync": "npm run cap:sync -w apps/app"
   },
   "engines": {

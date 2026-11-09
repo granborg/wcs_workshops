@@ -1,5 +1,5 @@
 // Package model holds database row types and the JSON shapes shared with the app
-// (mirrored in packages/shared/src/index.ts).
+// (mirrored in apps/app/src/types.ts).
 package model
 
 import "time"
@@ -39,7 +39,6 @@ type User struct {
 	Email     *string
 	Name      string
 	Role      string
-	BannerURL *string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -71,6 +70,7 @@ type QrCode struct {
 	CreatorID   string
 	DirectoryID *string
 	VideoID     *string
+	CreatedIP   *string
 	ExpiresAt   *time.Time
 	RevokedAt   *time.Time
 	CreatedAt   time.Time
@@ -80,25 +80,13 @@ type QrCode struct {
 type AccessGrant struct {
 	ID          string
 	UserID      string
+	CreatorID   string
 	DirectoryID *string
 	VideoID     *string
 	QrCodeID    *string
+	IP          *string
 	CreatedAt   time.Time
 	RevokedAt   *time.Time
-}
-
-type AuditEvent struct {
-	ID          string
-	At          time.Time
-	Type        string
-	CreatorID   string
-	ActorID     *string
-	SubjectID   *string
-	IP          *string
-	DirectoryID *string
-	VideoID     *string
-	QrCodeID    *string
-	Detail      *string
 }
 
 // ---- JSON shapes ----
@@ -108,16 +96,14 @@ type Me struct {
 	Name            string  `json:"name"`
 	Email           *string `json:"email"`
 	Role            string  `json:"role"`
-	BannerURL       *string `json:"bannerUrl"`
 	RootDirectoryID *string `json:"rootDirectoryId"`
 }
 
 type CreatorSummary struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	BannerURL       *string `json:"bannerUrl"`
-	RootDirectoryID string  `json:"rootDirectoryId"`
-	Own             bool    `json:"own"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	RootDirectoryID string `json:"rootDirectoryId"`
+	Own             bool   `json:"own"`
 }
 
 type VideoSummary struct {
@@ -178,16 +164,14 @@ type AccessGrantInfo struct {
 }
 
 type AuditEventInfo struct {
-	ID          string         `json:"id"`
-	At          string         `json:"at"`
-	Type        string         `json:"type"`
-	Actor       *UserRef       `json:"actor"`
-	Subject     *UserRef       `json:"subject"`
-	IP          *string        `json:"ip"`
-	DirectoryID *string        `json:"directoryId"`
-	VideoID     *string        `json:"videoId"`
-	QrCodeID    *string        `json:"qrCodeId"`
-	Detail      map[string]any `json:"detail"`
+	ID          string   `json:"id"`
+	At          string   `json:"at"`
+	Type        string   `json:"type"`
+	Subject     *UserRef `json:"subject"`
+	IP          *string  `json:"ip"`
+	DirectoryID *string  `json:"directoryId"`
+	VideoID     *string  `json:"videoId"`
+	QrCodeID    *string  `json:"qrCodeId"`
 }
 
 type UploadTicket struct {

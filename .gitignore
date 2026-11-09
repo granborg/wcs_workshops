@@ -5,6 +5,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 apps/api/bin/
+apps/api/web/dist/*
+!apps/api/web/dist/.gitkeep
 
 # environment and secrets
 .env
@@ -14,12 +16,16 @@ apps/api/bin/
 google-services.json
 GoogleService-Info.plist
 
-# local database and uploaded files
+# local database
 apps/api/data/
-apps/api/uploads/
 *.db
 *.db-wal
 *.db-shm
+
+# firebase emulator
+.firebase/
+firebase-debug.log
+ui-debug.log
 
 # editor and OS
 .vscode/*

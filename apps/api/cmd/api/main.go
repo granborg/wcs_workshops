@@ -1,4 +1,4 @@
-// Command api runs the WCS Workshops HTTP API.
+// Command api runs the WCS Workshops HTTP API and serves the built web app.
 package main
 
 import (
@@ -38,12 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
-		log.Error("create upload dir", "err", err)
-		os.Exit(1)
-	}
-
-	srv := server.New(cfg, database, auth.NewFirebase(), log)
+	srv := server.New(cfg, database, auth.NewFirebase(cfg.FirebaseProjectID), log)
 	hs := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Handler(),
@@ -55,8 +50,8 @@ func main() {
 
 	go func() {
 		log.Info("listening", "addr", cfg.Addr, "db", cfg.DatabasePath)
-		if cfg.DevAuthBypass {
-			log.Warn("DEV_AUTH_BYPASS is on: the X-Dev-User header is trusted")
+		if host := os.Getenv("FIREBASE_AUTH_EMULATOR_HOST"); host != "" {
+			log.Warn("using the Firebase Auth emulator; tokens are not signature-checked", "host", host)
 		}
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server stopped", "err", err)

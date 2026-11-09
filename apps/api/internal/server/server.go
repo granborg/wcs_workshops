@@ -4,13 +4,11 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -19,9 +17,9 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/config"
 	"github.com/granborg/wcs_workshops/apps/api/internal/httpx"
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
-	"github.com/granborg/wcs_workshops/apps/api/internal/notify"
 	"github.com/granborg/wcs_workshops/apps/api/internal/store"
 	"github.com/granborg/wcs_workshops/apps/api/internal/vimeo"
+	"github.com/granborg/wcs_workshops/apps/api/web"
 )
 
 // Server holds the dependencies handlers need.
@@ -29,20 +27,17 @@ type Server struct {
 	cfg      config.Config
 	st       *store.Store
 	vimeo    *vimeo.Client
-	notifier *notify.Notifier
 	verifier auth.Verifier
 	log      *slog.Logger
 	mux      *http.ServeMux
 }
 
-// New builds a Server. verifier may be nil when DevAuthBypass is on and no bearer tokens are expected.
+// New builds a Server.
 func New(cfg config.Config, database *sql.DB, verifier auth.Verifier, log *slog.Logger) *Server {
-	st := store.New(database)
 	s := &Server{
 		cfg:      cfg,
-		st:       st,
+		st:       store.New(database),
 		vimeo:    vimeo.New(cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains),
-		notifier: notify.New(st, log),
 		verifier: verifier,
 		log:      log,
 	}
@@ -58,46 +53,42 @@ func (s *Server) Handler() http.Handler {
 // handler is an authenticated route: the signed-in user is resolved before it runs.
 type handler func(w http.ResponseWriter, r *http.Request, u *model.User) error
 
+// API routes live under /api so the same binary can serve the web app at /.
 func (s *Server) routes() {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
-	m.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.cfg.UploadDir))))
 
 	a := s.authed
-	m.Handle("GET /me", a(s.getMe))
-	m.Handle("PATCH /me", a(s.patchMe))
-	m.Handle("PUT /me/banner", a(s.putBanner))
-	m.Handle("DELETE /me/banner", a(s.deleteBanner))
+	m.Handle("GET /api/me", a(s.getMe))
+	m.Handle("PATCH /api/me", a(s.patchMe))
 
-	m.Handle("GET /library", a(s.listLibrary))
-	m.Handle("GET /library/{creatorId}", a(s.getLibraryTree))
+	m.Handle("GET /api/library", a(s.listLibrary))
+	m.Handle("GET /api/library/{creatorId}", a(s.getLibraryTree))
 
-	m.Handle("POST /directories", a(s.createDirectory))
-	m.Handle("PATCH /directories/{id}", a(s.patchDirectory))
-	m.Handle("DELETE /directories/{id}", a(s.deleteDirectory))
+	m.Handle("POST /api/directories", a(s.createDirectory))
+	m.Handle("PATCH /api/directories/{id}", a(s.patchDirectory))
+	m.Handle("DELETE /api/directories/{id}", a(s.deleteDirectory))
 
-	m.Handle("POST /videos/upload-ticket", a(s.uploadTicket))
-	m.Handle("POST /videos/{id}/complete", a(s.completeVideo))
-	m.Handle("GET /videos/{id}", a(s.getVideo))
-	m.Handle("GET /videos/{id}/playback", a(s.playback))
-	m.Handle("PATCH /videos/{id}", a(s.patchVideo))
-	m.Handle("DELETE /videos/{id}", a(s.deleteVideo))
+	m.Handle("POST /api/videos/upload-ticket", a(s.uploadTicket))
+	m.Handle("POST /api/videos/{id}/complete", a(s.completeVideo))
+	m.Handle("GET /api/videos/{id}", a(s.getVideo))
+	m.Handle("GET /api/videos/{id}/playback", a(s.playback))
+	m.Handle("PATCH /api/videos/{id}", a(s.patchVideo))
+	m.Handle("DELETE /api/videos/{id}", a(s.deleteVideo))
 
-	m.Handle("POST /share", a(s.createShare))
-	m.Handle("GET /share", a(s.listShare))
-	m.Handle("DELETE /share/{id}", a(s.revokeShare))
+	m.Handle("POST /api/share", a(s.createShare))
+	m.Handle("GET /api/share", a(s.listShare))
+	m.Handle("DELETE /api/share/{id}", a(s.revokeShare))
 
-	m.Handle("GET /access", a(s.listAccess))
-	m.Handle("DELETE /access/{id}", a(s.revokeAccess))
+	m.Handle("GET /api/access", a(s.listAccess))
+	m.Handle("DELETE /api/access/{id}", a(s.revokeAccess))
 
-	m.Handle("POST /redeem", a(s.redeem))
-	m.Handle("GET /audit", a(s.listAudit))
+	m.Handle("POST /api/redeem", a(s.redeem))
+	m.Handle("GET /api/audit", a(s.listAudit))
 
-	m.Handle("POST /devices", a(s.registerDevice))
-	m.Handle("DELETE /devices/{token}", a(s.removeDevice))
-
+	m.Handle("/", spaHandler(web.Dist))
 	s.mux = m
 }
 
@@ -117,27 +108,15 @@ func (s *Server) authed(h handler) http.Handler {
 
 func (s *Server) identify(r *http.Request) (*model.User, error) {
 	ctx := r.Context()
-	var id auth.Identity
-
-	if dev := strings.TrimSpace(r.Header.Get("X-Dev-User")); s.cfg.DevAuthBypass && dev != "" {
-		email := strings.ToLower(dev)
-		id = auth.Identity{AuthUID: "dev:" + email, Email: &email, Name: strings.SplitN(email, "@", 2)[0]}
-	} else {
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			return nil, httpx.Unauthenticated("Missing bearer token")
-		}
-		if s.verifier == nil {
-			return nil, httpx.Unauthenticated("Token verification is not configured")
-		}
-		var err error
-		id, err = s.verifier.Verify(ctx, strings.TrimPrefix(header, "Bearer "))
-		if err != nil {
-			s.log.Info("token rejected", "err", err)
-			return nil, httpx.Unauthenticated("Invalid or expired token")
-		}
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		return nil, httpx.Unauthenticated("Missing bearer token")
 	}
-
+	id, err := s.verifier.Verify(ctx, strings.TrimPrefix(header, "Bearer "))
+	if err != nil {
+		s.log.Info("token rejected", "err", err)
+		return nil, httpx.Unauthenticated("Invalid or expired token")
+	}
 	u, err := s.st.GetUserByAuthUID(ctx, id.AuthUID)
 	if errors.Is(err, store.ErrNotFound) {
 		return s.st.CreateUser(ctx, id.AuthUID, id.Email, id.Name)
@@ -169,32 +148,8 @@ func clientIP(r *http.Request) *string {
 	return &ip
 }
 
-func (s *Server) bannerURL(path *string) *string {
-	if path == nil {
-		return nil
-	}
-	if strings.HasPrefix(*path, "http") {
-		return path
-	}
-	full := s.cfg.PublicAPIURL + *path
-	return &full
-}
-
-func (s *Server) creatorSummary(u *model.User, rootID, viewerID string) model.CreatorSummary {
-	return model.CreatorSummary{ID: u.ID, Name: u.Name, BannerURL: s.bannerURL(u.BannerURL), RootDirectoryID: rootID, Own: u.ID == viewerID}
-}
-
-// audit records an event. Failures are logged; they never fail the request.
-func (s *Server) audit(ctx context.Context, e model.AuditEvent, detail map[string]any) {
-	if detail != nil {
-		if b, err := json.Marshal(detail); err == nil {
-			str := string(b)
-			e.Detail = &str
-		}
-	}
-	if err := s.st.InsertAudit(ctx, e); err != nil {
-		s.log.Error("audit insert failed", "err", err, "type", e.Type)
-	}
+func creatorSummary(u *model.User, rootID, viewerID string) model.CreatorSummary {
+	return model.CreatorSummary{ID: u.ID, Name: u.Name, RootDirectoryID: rootID, Own: u.ID == viewerID}
 }
 
 // canView reports whether userID may play the video: owner, or an active grant on it or an ancestor.
@@ -245,9 +200,4 @@ func vimeoErr(err error) error {
 		return httpx.NewError(http.StatusBadGateway, "vimeo_error", ae.Error())
 	}
 	return err
-}
-
-// background returns a context detached from the request, for work that outlives the response.
-func background() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 15*time.Second)
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import type { CreatorSummary } from '@wcs/shared'
+import type { CreatorSummary } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import Icon from '@/components/Icon.vue'
 
@@ -50,13 +50,7 @@ function open(c: CreatorSummary) {
       @click="open(c)"
       @keydown.enter="open(c)"
     >
-      <img
-        v-if="c.bannerUrl"
-        :src="c.bannerUrl"
-        :alt="c.name"
-        style="width: 96px; height: 48px; object-fit: cover; border-radius: 8px"
-      />
-      <span v-else class="lead"><Icon name="folder" /></span>
+      <span class="lead"><Icon name="folder" /></span>
       <div class="grow">
         <div class="title" :class="{ bold: c.own }">{{ c.name }}</div>
         <div v-if="c.own" class="sub">Your collection</div>

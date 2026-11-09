@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { AccessGrantInfo } from '@wcs/shared'
+import type { AccessGrantInfo } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { formatDateTime } from '@/utils/format'
 import BaseDialog from './BaseDialog.vue'

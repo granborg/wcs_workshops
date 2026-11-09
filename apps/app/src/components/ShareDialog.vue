@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import type { QrCodeInfo } from '@wcs/shared'
+import type { QrCodeInfo } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { formatDateTime } from '@/utils/format'
 import BaseDialog from './BaseDialog.vue'

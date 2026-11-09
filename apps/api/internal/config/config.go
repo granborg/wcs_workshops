@@ -13,38 +13,33 @@ import (
 type Config struct {
 	Addr              string
 	DatabasePath      string
-	PublicAPIURL      string
 	CORSOrigins       []string
-	DevAuthBypass     bool
+	FirebaseProjectID string
 	VimeoAccessToken  string
 	VimeoPrivacy      string // "unlisted" or "disable"
 	VimeoEmbedDomains []string
-	UploadDir         string
-	Production        bool
 }
 
 // Load reads .env from the working directory when present, then the environment.
+//
+// Two Firebase variables are read by the Firebase Admin SDK itself, not here:
+// GOOGLE_APPLICATION_CREDENTIALS (service account, production) and
+// FIREBASE_AUTH_EMULATOR_HOST (local Auth emulator, development).
 func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	c := Config{
 		Addr:              get("HOST", "0.0.0.0") + ":" + get("PORT", "3000"),
 		DatabasePath:      get("DATABASE_PATH", "./data/wcs.db"),
-		PublicAPIURL:      strings.TrimRight(get("PUBLIC_API_URL", "http://localhost:3000"), "/"),
 		CORSOrigins:       list("CORS_ORIGINS", "http://localhost:5173,capacitor://localhost,http://localhost"),
-		DevAuthBypass:     boolean("DEV_AUTH_BYPASS", false),
+		FirebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
 		VimeoAccessToken:  os.Getenv("VIMEO_ACCESS_TOKEN"),
 		VimeoPrivacy:      get("VIMEO_PRIVACY", "unlisted"),
 		VimeoEmbedDomains: list("VIMEO_EMBED_DOMAINS", ""),
-		UploadDir:         get("UPLOAD_DIR", "./uploads"),
-		Production:        os.Getenv("APP_ENV") == "production",
 	}
 
 	if c.VimeoPrivacy != "unlisted" && c.VimeoPrivacy != "disable" {
 		return c, fmt.Errorf("VIMEO_PRIVACY must be unlisted or disable, got %q", c.VimeoPrivacy)
-	}
-	if c.Production && c.DevAuthBypass {
-		return c, fmt.Errorf("DEV_AUTH_BYPASS must not be enabled in production")
 	}
 	return c, nil
 }
@@ -54,17 +49,6 @@ func get(name, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func boolean(name string, fallback bool) bool {
-	switch strings.ToLower(os.Getenv(name)) {
-	case "":
-		return fallback
-	case "1", "true", "yes":
-		return true
-	default:
-		return false
-	}
 }
 
 func list(name, fallback string) []string {

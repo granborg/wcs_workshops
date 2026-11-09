@@ -1,4 +1,4 @@
-// Types shared between the Capacitor app and the API.
+// JSON shapes returned by the Go API. Mirrors apps/api/internal/model/model.go.
 // No enums: the app compiles with erasableSyntaxOnly.
 
 export const USER_ROLES = ['viewer', 'creator'] as const
@@ -7,16 +7,7 @@ export type UserRole = (typeof USER_ROLES)[number]
 export const VIDEO_STATUSES = ['uploading', 'processing', 'ready', 'failed'] as const
 export type VideoStatus = (typeof VIDEO_STATUSES)[number]
 
-export const AUDIT_TYPES = [
-  'qr.created',
-  'qr.revoked',
-  'access.granted',
-  'access.revoked',
-  'video.deleted',
-  'video.moved',
-  'directory.moved',
-  'directory.deleted',
-] as const
+export const AUDIT_TYPES = ['qr.created', 'qr.revoked', 'access.granted', 'access.revoked'] as const
 export type AuditType = (typeof AUDIT_TYPES)[number]
 
 /** URL scheme encoded in QR images. The app also accepts the bare code. */
@@ -27,7 +18,6 @@ export interface Me {
   name: string
   email: string | null
   role: UserRole
-  bannerUrl: string | null
   /** Root directory id when the user is a creator. */
   rootDirectoryId: string | null
 }
@@ -35,7 +25,6 @@ export interface Me {
 export interface CreatorSummary {
   id: string
   name: string
-  bannerUrl: string | null
   rootDirectoryId: string
   /** True when this is the signed-in user's own collection. */
   own: boolean
@@ -65,6 +54,14 @@ export interface LibraryTree {
   root: DirectoryNode
 }
 
+export interface DirectoryRecord {
+  id: string
+  ownerId: string
+  parentId: string | null
+  name: string
+  createdAt: string
+}
+
 export interface QrCodeInfo {
   id: string
   code: string
@@ -91,13 +88,12 @@ export interface AuditEventInfo {
   id: string
   at: string
   type: AuditType
-  actor: { id: string; name: string } | null
+  /** The viewer affected, for access events. */
   subject: { id: string; name: string } | null
   ip: string | null
   directoryId: string | null
   videoId: string | null
   qrCodeId: string | null
-  detail: Record<string, unknown> | null
 }
 
 export interface UploadTicket {

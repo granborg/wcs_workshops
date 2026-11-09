@@ -1,5 +1,4 @@
-// Package auth verifies identity tokens. Firebase Authentication is the only production verifier;
-// the development bypass lives in the server package.
+// Package auth verifies Firebase ID tokens.
 package auth
 
 import (
@@ -24,18 +23,26 @@ type Verifier interface {
 	Verify(ctx context.Context, idToken string) (Identity, error)
 }
 
-// Firebase verifies Firebase ID tokens. It initialises lazily using GOOGLE_APPLICATION_CREDENTIALS.
+// Firebase verifies Firebase ID tokens. It initialises lazily.
+//
+// Credentials come from GOOGLE_APPLICATION_CREDENTIALS in production. When FIREBASE_AUTH_EMULATOR_HOST is set,
+// the Admin SDK talks to the local Auth emulator and needs no credentials, only the project id.
 type Firebase struct {
-	once   sync.Once
-	client *fbauth.Client
-	err    error
+	projectID string
+	once      sync.Once
+	client    *fbauth.Client
+	err       error
 }
 
-// NewFirebase creates an uninitialised verifier. Nothing happens until the first Verify call.
-func NewFirebase() *Firebase { return &Firebase{} }
+// NewFirebase creates an uninitialised verifier. projectID may be empty when credentials carry it.
+func NewFirebase(projectID string) *Firebase { return &Firebase{projectID: projectID} }
 
 func (f *Firebase) init(ctx context.Context) {
-	app, err := firebase.NewApp(ctx, nil)
+	var conf *firebase.Config
+	if f.projectID != "" {
+		conf = &firebase.Config{ProjectID: f.projectID}
+	}
+	app, err := firebase.NewApp(ctx, conf)
 	if err != nil {
 		f.err = err
 		return
@@ -43,7 +50,7 @@ func (f *Firebase) init(ctx context.Context) {
 	f.client, f.err = app.Auth(ctx)
 }
 
-// Verify checks the token signature and expiry and extracts uid, email and name.
+// Verify checks the token and extracts uid, email and name.
 func (f *Firebase) Verify(ctx context.Context, idToken string) (Identity, error) {
 	f.once.Do(func() { f.init(ctx) })
 	if f.err != nil {
@@ -53,13 +60,17 @@ func (f *Firebase) Verify(ctx context.Context, idToken string) (Identity, error)
 	if err != nil {
 		return Identity{}, err
 	}
-	id := Identity{AuthUID: tok.UID, Name: "New user"}
-	if e, ok := tok.Claims["email"].(string); ok && e != "" {
+	return identityFromClaims(tok.UID, tok.Claims), nil
+}
+
+func identityFromClaims(uid string, claims map[string]any) Identity {
+	id := Identity{AuthUID: uid, Name: "New user"}
+	if e, ok := claims["email"].(string); ok && e != "" {
 		id.Email = &e
 		id.Name = strings.SplitN(e, "@", 2)[0]
 	}
-	if n, ok := tok.Claims["name"].(string); ok && n != "" {
+	if n, ok := claims["name"].(string); ok && n != "" {
 		id.Name = n
 	}
-	return id, nil
+	return id
 }

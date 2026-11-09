@@ -39,31 +39,24 @@ func (s *Server) listAccess(w http.ResponseWriter, r *http.Request, u *model.Use
 	return nil
 }
 
-// revokeAccess revokes one grant. The row is kept with revoked_at set, for the audit trail.
+// revokeAccess revokes one grant. The row is kept with revoked_at set, which is the audit record.
 func (s *Server) revokeAccess(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	if err := requireCreator(u); err != nil {
 		return err
 	}
-	ctx := r.Context()
 	id := r.PathValue("id")
 	if !isUUID(id) {
 		return httpx.NotFound("Access grant")
 	}
-	g, owner, err := s.st.GetGrantOwner(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && owner != u.ID) {
+	g, err := s.st.GetGrant(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && g.CreatorID != u.ID) {
 		return httpx.NotFound("Access grant")
 	}
 	if err != nil {
 		return err
 	}
-	if g.RevokedAt == nil {
-		if err := s.st.RevokeGrant(ctx, id, time.Now()); err != nil {
-			return err
-		}
-		s.audit(ctx, model.AuditEvent{
-			Type: "access.revoked", CreatorID: u.ID, ActorID: &u.ID, SubjectID: &g.UserID, IP: clientIP(r),
-			DirectoryID: g.DirectoryID, VideoID: g.VideoID, QrCodeID: g.QrCodeID,
-		}, nil)
+	if err := s.st.RevokeGrant(r.Context(), id, time.Now()); err != nil {
+		return err
 	}
 	httpx.WriteJSON(w, http.StatusNoContent, nil)
 	return nil

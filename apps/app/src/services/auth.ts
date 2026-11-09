@@ -1,11 +1,12 @@
 /**
- * Identity provider adapter. Three implementations, chosen at startup:
- *  - dev:    VITE_DEV_AUTH=true. Sends an X-Dev-User header; the API must run with DEV_AUTH_BYPASS=true.
+ * Identity adapter over Firebase Authentication. Two implementations, chosen at startup:
  *  - web:    FirebaseUI v7 core (@firebase-oss/ui-core) over the Firebase JS SDK. Runs in browsers.
  *  - native: Capacitor Firebase Authentication plugin. Runs inside the iOS and Android shells, where
  *            Google refuses OAuth in embedded WebViews, so the native provider SDKs are required.
  *
- * All three produce a Firebase ID token (or the dev header) that the API verifies.
+ * Local development uses the Firebase Auth emulator: set VITE_FIREBASE_AUTH_EMULATOR_HOST (for example
+ * 127.0.0.1:9099) and no real Firebase project is needed. The emulator offers fake Google, Apple and
+ * Microsoft accounts through the same buttons.
  */
 
 import { Capacitor } from '@capacitor/core'
@@ -13,21 +14,20 @@ import { Capacitor } from '@capacitor/core'
 export type Provider = 'google' | 'apple' | 'microsoft'
 
 export interface AuthService {
-  readonly isDev: boolean
   isSignedIn(): Promise<boolean>
   signIn(provider: Provider): Promise<void>
   signOut(): Promise<void>
   getHeaders(): Promise<Record<string, string>>
-  /** Dev mode only: switch the acting user. */
-  setDevEmail(email: string): void
-  getDevEmail(): string
 }
 
+const EMULATOR = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST
+
+// Against the emulator any non-empty config works; the demo- project prefix needs no real project.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? (EMULATOR ? 'demo-api-key' : undefined),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? (EMULATOR ? 'demo-wcs.firebaseapp.com' : undefined),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? (EMULATOR ? 'demo-wcs' : undefined),
+  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? (EMULATOR ? '1:0:web:demo' : undefined),
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
 }
 
@@ -36,58 +36,8 @@ async function firebaseApp() {
   return getApps()[0] ?? initializeApp(firebaseConfig)
 }
 
-const noDev = {
-  setDevEmail() {
-    // not applicable outside dev mode
-  },
-  getDevEmail() {
-    return ''
-  },
-}
-
-/* ---------------- dev ---------------- */
-
-const DEV_EMAIL_KEY = 'wcsw.devEmail'
-const DEV_SIGNED_IN_KEY = 'wcsw.devSignedIn'
-
-function safeGet(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function safeSet(key: string, value: string | null) {
-  try {
-    if (value === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, value)
-  } catch {
-    // storage unavailable; the session simply does not persist
-  }
-}
-
-const devAuth: AuthService = {
-  isDev: true,
-  async isSignedIn() {
-    return safeGet(DEV_SIGNED_IN_KEY) === '1'
-  },
-  async signIn() {
-    if (!this.getDevEmail()) this.setDevEmail(import.meta.env.VITE_DEV_USER_EMAIL ?? 'dev@example.com')
-    safeSet(DEV_SIGNED_IN_KEY, '1')
-  },
-  async signOut() {
-    safeSet(DEV_SIGNED_IN_KEY, null)
-  },
-  async getHeaders() {
-    return { 'X-Dev-User': this.getDevEmail() }
-  },
-  setDevEmail(email: string) {
-    safeSet(DEV_EMAIL_KEY, email.trim().toLowerCase())
-  },
-  getDevEmail() {
-    return safeGet(DEV_EMAIL_KEY) ?? import.meta.env.VITE_DEV_USER_EMAIL ?? 'dev@example.com'
-  },
+function bearer(token: string | null | undefined): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 /* ---------------- web: FirebaseUI core ---------------- */
@@ -102,13 +52,13 @@ let webUIPromise: Promise<WebUI> | null = null
 function webUI(): Promise<WebUI> {
   webUIPromise ??= (async () => {
     const app = await firebaseApp()
-    const { getAuth } = await import('firebase/auth')
+    const { getAuth, connectAuthEmulator } = await import('firebase/auth')
     const { initializeUI } = await import('@firebase-oss/ui-core')
     const auth = getAuth(app)
-    // Default behaviors: popup OAuth strategy and reCAPTCHA config. Swap in providerRedirectStrategy()
-    // from @firebase-oss/ui-core if popups prove unreliable on mobile browsers.
-    const ui = initializeUI({ app, auth })
-    return { ui, auth }
+    if (EMULATOR) connectAuthEmulator(auth, `http://${EMULATOR}`, { disableWarnings: true })
+    // Default behaviors: popup OAuth strategy. Swap in providerRedirectStrategy() from
+    // @firebase-oss/ui-core if popups prove unreliable on mobile browsers.
+    return { ui: initializeUI({ app, auth }), auth }
   })()
   return webUIPromise
 }
@@ -133,8 +83,6 @@ async function providerFor(p: Provider) {
 }
 
 const webAuth: AuthService = {
-  ...noDev,
-  isDev: false,
   async isSignedIn() {
     const { auth } = await webUI()
     await authReady(auth)
@@ -153,24 +101,28 @@ const webAuth: AuthService = {
   async getHeaders() {
     const { auth } = await webUI()
     await authReady(auth)
-    const token = await auth.currentUser?.getIdToken()
-    const headers: Record<string, string> = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    return headers
+    return bearer(await auth.currentUser?.getIdToken())
   },
 }
 
 /* ---------------- native: Capacitor Firebase plugin ---------------- */
 
-async function nativePlugin() {
-  await firebaseApp()
-  const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
-  return FirebaseAuthentication
+let pluginPromise: Promise<typeof import('@capacitor-firebase/authentication').FirebaseAuthentication> | null = null
+
+function nativePlugin() {
+  pluginPromise ??= (async () => {
+    await firebaseApp()
+    const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
+    if (EMULATOR) {
+      const [host, port] = EMULATOR.split(':')
+      await FirebaseAuthentication.useEmulator({ host: host ?? '127.0.0.1', port: Number(port ?? 9099) })
+    }
+    return FirebaseAuthentication
+  })()
+  return pluginPromise
 }
 
 const nativeAuth: AuthService = {
-  ...noDev,
-  isDev: false,
   async isSignedIn() {
     const { user } = await (await nativePlugin()).getCurrentUser()
     return user !== null
@@ -186,15 +138,8 @@ const nativeAuth: AuthService = {
   },
   async getHeaders() {
     const { token } = await (await nativePlugin()).getIdToken()
-    const headers: Record<string, string> = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    return headers
+    return bearer(token)
   },
 }
 
-function pick(): AuthService {
-  if (import.meta.env.VITE_DEV_AUTH === 'true') return devAuth
-  return Capacitor.isNativePlatform() ? nativeAuth : webAuth
-}
-
-export const authService: AuthService = pick()
+export const authService: AuthService = Capacitor.isNativePlatform() ? nativeAuth : webAuth

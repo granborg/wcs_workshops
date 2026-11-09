@@ -3,6 +3,7 @@ import type {
   ApiError,
   AuditEventInfo,
   CreatorSummary,
+  DirectoryRecord,
   LibraryTree,
   Me,
   PlaybackInfo,
@@ -11,10 +12,12 @@ import type {
   UploadTicket,
   UserRole,
   VideoSummary,
-} from '@wcs/shared'
+} from '@/types'
 import { authService } from './auth'
 
-const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+// Relative by default: the Go binary serves the app and the API from one origin, and the Vite dev
+// server proxies /api. Native builds must set VITE_API_URL to the absolute API URL.
+const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 
 export class ApiRequestError extends Error {
   readonly status: number
@@ -32,12 +35,10 @@ export function errorMessage(err: unknown): string {
   return String(err)
 }
 
-async function request<T>(method: string, path: string, body?: unknown, form?: FormData): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { ...(await authService.getHeaders()) }
   const init: RequestInit = { method, headers }
-  if (form) {
-    init.body = form
-  } else if (body !== undefined) {
+  if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
@@ -58,26 +59,12 @@ function qs(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : ''
 }
 
-export interface DirectoryRecord {
-  id: string
-  ownerId: string
-  parentId: string | null
-  name: string
-  createdAt: string
-}
-
 export type ShareTarget = { directoryId: string; videoId?: undefined } | { videoId: string; directoryId?: undefined }
 
 export const api = {
   me: {
     get: () => request<Me>('GET', '/me'),
     patch: (patch: { name?: string; role?: UserRole }) => request<Me>('PATCH', '/me', patch),
-    setBanner: (file: File) => {
-      const form = new FormData()
-      form.append('file', file)
-      return request<Me>('PUT', '/me/banner', undefined, form)
-    },
-    clearBanner: () => request<Me>('DELETE', '/me/banner'),
   },
   library: {
     list: () => request<CreatorSummary[]>('GET', '/library'),
@@ -112,10 +99,5 @@ export const api = {
   redeem: (code: string) => request<RedeemResult>('POST', '/redeem', { code }),
   audit: {
     list: (limit = 50, before?: string) => request<AuditEventInfo[]>('GET', `/audit${qs({ limit, before })}`),
-  },
-  devices: {
-    register: (token: string, platform: 'ios' | 'android' | 'web') =>
-      request<void>('POST', '/devices', { token, platform }),
-    remove: (token: string) => request<void>('DELETE', `/devices/${encodeURIComponent(token)}`),
   },
 }

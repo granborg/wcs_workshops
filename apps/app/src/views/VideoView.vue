@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { PlaybackInfo, VideoSummary } from '@wcs/shared'
+import type { PlaybackInfo, VideoSummary } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import Icon from '@/components/Icon.vue'
 

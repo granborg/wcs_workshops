@@ -8,17 +8,16 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
 )
 
-const userCols = `id, auth_uid, email, name, role, banner_url, created_at, updated_at`
+const userCols = `id, auth_uid, email, name, role, created_at, updated_at`
 
 func scanUser(r scanner) (*model.User, error) {
 	var u model.User
-	var email, banner sql.NullString
+	var email sql.NullString
 	var created, updated int64
-	if err := r.Scan(&u.ID, &u.AuthUID, &email, &u.Name, &u.Role, &banner, &created, &updated); err != nil {
+	if err := r.Scan(&u.ID, &u.AuthUID, &email, &u.Name, &u.Role, &created, &updated); err != nil {
 		return nil, err
 	}
 	u.Email = ptrStr(email)
-	u.BannerURL = ptrStr(banner)
 	u.CreatedAt = fromMs(created)
 	u.UpdatedAt = fromMs(updated)
 	return &u, nil
@@ -37,7 +36,7 @@ func (s *Store) GetUserByAuthUID(ctx context.Context, authUID string) (*model.Us
 func (s *Store) CreateUser(ctx context.Context, authUID string, email *string, name string) (*model.User, error) {
 	t := now()
 	u := &model.User{ID: newID(), AuthUID: authUID, Email: email, Name: name, Role: model.RoleViewer, CreatedAt: t, UpdatedAt: t}
-	err := s.exec(ctx, `INSERT INTO users (`+userCols+`) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+	err := s.exec(ctx, `INSERT INTO users (`+userCols+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.AuthUID, nullStr(u.Email), u.Name, u.Role, toMs(t), toMs(t))
 	return u, err
 }
@@ -56,13 +55,6 @@ func (s *Store) UpdateUser(ctx context.Context, id string, name, role *string) (
 	}
 	args = append(args, id)
 	if err := s.exec(ctx, `UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
-		return nil, err
-	}
-	return s.GetUser(ctx, id)
-}
-
-func (s *Store) SetBanner(ctx context.Context, id string, url *string) (*model.User, error) {
-	if err := s.exec(ctx, `UPDATE users SET banner_url = ?, updated_at = ? WHERE id = ?`, nullStr(url), toMs(now()), id); err != nil {
 		return nil, err
 	}
 	return s.GetUser(ctx, id)

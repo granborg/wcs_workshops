@@ -1,9 +1,8 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { Me, UserRole } from '@wcs/shared'
+import type { Me, UserRole } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { authService, type Provider } from '@/services/auth'
-import { registerPush } from '@/services/push'
 
 type Status = 'loading' | 'signedOut' | 'signedIn'
 
@@ -18,21 +17,18 @@ export const useAuthStore = defineStore('auth', () => {
   async function refresh() {
     me.value = await api.me.get()
     status.value = 'signedIn'
-    void registerPush()
   }
 
   function init() {
-    if (!initPromise) {
-      initPromise = (async () => {
-        try {
-          if (await authService.isSignedIn()) await refresh()
-          else status.value = 'signedOut'
-        } catch (err) {
-          error.value = errorMessage(err)
-          status.value = 'signedOut'
-        }
-      })()
-    }
+    initPromise ??= (async () => {
+      try {
+        if (await authService.isSignedIn()) await refresh()
+        else status.value = 'signedOut'
+      } catch (err) {
+        error.value = errorMessage(err)
+        status.value = 'signedOut'
+      }
+    })()
     return initPromise
   }
 
@@ -52,9 +48,5 @@ export const useAuthStore = defineStore('auth', () => {
     me.value = await api.me.patch(patch)
   }
 
-  function setMe(next: Me) {
-    me.value = next
-  }
-
-  return { me, status, error, isCreator, init, refresh, signIn, signOut, update, setMe }
+  return { me, status, error, isCreator, init, refresh, signIn, signOut, update }
 })

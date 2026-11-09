@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { DirectoryNode, LibraryTree, VideoSummary } from '@wcs/shared'
+import type { DirectoryNode, LibraryTree, VideoSummary } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { findNode, pathTo } from '@/utils/tree'
 import { formatDuration } from '@/utils/format'
 import Icon from '@/components/Icon.vue'
-import CreatorBanner from '@/components/CreatorBanner.vue'
 import ActionSheet, { type SheetAction } from '@/components/ActionSheet.vue'
 import TextPromptDialog from '@/components/TextPromptDialog.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -155,7 +154,7 @@ function dirName(node: DirectoryNode) {
   <p v-if="loading && !tree" class="muted">Loading…</p>
 
   <template v-if="tree && current">
-    <CreatorBanner v-if="crumbs.length <= 1" :creator="tree.creator" />
+    <h2 v-if="crumbs.length <= 1" :style="tree.creator.own ? 'font-weight: 700' : ''">{{ tree.creator.name }}</h2>
 
     <nav v-if="crumbs.length > 1" class="crumbs" aria-label="Folder path">
       <template v-for="(c, i) in crumbs" :key="c.id">

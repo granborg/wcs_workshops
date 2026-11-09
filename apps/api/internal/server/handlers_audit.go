@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
 )
 
+// listAudit returns the creator's access history, derived from grants and QR codes.
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	if err := requireCreator(u); err != nil {
 		return err
@@ -41,9 +41,6 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, u *model.User
 
 	idSet := map[string]bool{}
 	for _, e := range events {
-		if e.ActorID != nil {
-			idSet[*e.ActorID] = true
-		}
 		if e.SubjectID != nil {
 			idSet[*e.SubjectID] = true
 		}
@@ -60,26 +57,19 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, u *model.User
 	for _, usr := range users {
 		names[usr.ID] = usr.Name
 	}
-	ref := func(id *string) *model.UserRef {
-		if id == nil {
-			return nil
-		}
-		name, ok := names[*id]
-		if !ok {
-			name = "Deleted user"
-		}
-		return &model.UserRef{ID: *id, Name: name}
-	}
 
 	out := make([]model.AuditEventInfo, len(events))
 	for i, e := range events {
 		info := model.AuditEventInfo{
-			ID: e.ID, At: model.ISO(e.At), Type: e.Type,
-			Actor: ref(e.ActorID), Subject: ref(e.SubjectID), IP: e.IP,
+			ID: e.Type + ":" + e.SourceID, At: model.ISO(e.At), Type: e.Type, IP: e.IP,
 			DirectoryID: e.DirectoryID, VideoID: e.VideoID, QrCodeID: e.QrCodeID,
 		}
-		if e.Detail != nil {
-			_ = json.Unmarshal([]byte(*e.Detail), &info.Detail)
+		if e.SubjectID != nil {
+			name, ok := names[*e.SubjectID]
+			if !ok {
+				name = "Deleted user"
+			}
+			info.Subject = &model.UserRef{ID: *e.SubjectID, Name: name}
 		}
 		out[i] = info
 	}

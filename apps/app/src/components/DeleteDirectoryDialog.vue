@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { DirectoryNode } from '@wcs/shared'
+import type { DirectoryNode } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { countVideos, flatten, subtreeIds } from '@/utils/tree'
 import BaseDialog from './BaseDialog.vue'

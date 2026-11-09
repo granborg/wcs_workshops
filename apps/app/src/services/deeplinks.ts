@@ -1,6 +1,6 @@
 import { App as CapacitorApp } from '@capacitor/app'
 import type { Router } from 'vue-router'
-import { QR_SCHEME } from '@wcs/shared'
+import { QR_SCHEME } from '@/types'
 
 /**
  * When the phone camera scans one of our QR codes and the OS opens the app with the wcsw:// URL,

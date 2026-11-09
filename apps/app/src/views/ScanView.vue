@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { RedeemResult } from '@wcs/shared'
+import type { RedeemResult } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { scanQrCode, scannerAvailable } from '@/services/scanner'
 import Icon from '@/components/Icon.vue'

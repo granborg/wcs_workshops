@@ -190,32 +190,31 @@ func (s *Server) patchVideo(w http.ResponseWriter, r *http.Request, u *model.Use
 			s.log.Warn("vimeo rename failed", "video", v.ID, "err", err)
 		}
 	}
-	if req.DirectoryID != nil && *req.DirectoryID != v.DirectoryID {
-		s.audit(ctx, model.AuditEvent{Type: "video.moved", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r), VideoID: &v.ID},
-			map[string]any{"from": v.DirectoryID, "to": *req.DirectoryID})
-	}
 	httpx.WriteJSON(w, http.StatusOK, updated.ToSummary())
 	return nil
+}
+
+// deleteVideoEverywhere removes the video from Vimeo (best effort) and from the database.
+func (s *Server) deleteVideoEverywhere(ctx context.Context, v *model.Video) error {
+	if v.VimeoID != nil {
+		if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil && !errors.Is(err, vimeo.ErrNotConfigured) {
+			s.log.Warn("vimeo delete failed; removing local record anyway", "video", v.ID, "err", err)
+		}
+	}
+	return s.st.DeleteVideo(ctx, v.ID)
 }
 
 func (s *Server) deleteVideo(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	if err := requireCreator(u); err != nil {
 		return err
 	}
-	ctx := r.Context()
-	v, err := s.ownedVideo(ctx, u, r.PathValue("id"))
+	v, err := s.ownedVideo(r.Context(), u, r.PathValue("id"))
 	if err != nil {
 		return err
 	}
-	if v.VimeoID != nil {
-		if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil && !errors.Is(err, vimeo.ErrNotConfigured) {
-			s.log.Warn("vimeo delete failed; removing local record anyway", "video", v.ID, "err", err)
-		}
-	}
-	if err := s.st.DeleteVideo(ctx, v.ID); err != nil {
+	if err := s.deleteVideoEverywhere(r.Context(), v); err != nil {
 		return err
 	}
-	s.audit(ctx, model.AuditEvent{Type: "video.deleted", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r), VideoID: &v.ID}, nil)
 	httpx.WriteJSON(w, http.StatusNoContent, nil)
 	return nil
 }

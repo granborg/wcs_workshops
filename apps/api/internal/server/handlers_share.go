@@ -14,7 +14,7 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/store"
 )
 
-// target picks exactly one of directoryId / videoId from JSON or query values.
+// parseTarget picks exactly one of directoryId / videoId.
 func parseTarget(directoryID, videoID *string) (*string, *string, error) {
 	if directoryID != nil && *directoryID == "" {
 		directoryID = nil
@@ -94,14 +94,10 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err != nil {
 		return err
 	}
-	qr, err := s.st.CreateQrCode(ctx, code, u.ID, dirID, vidID, expires)
+	qr, err := s.st.CreateQrCode(ctx, code, u.ID, dirID, vidID, clientIP(r), expires)
 	if err != nil {
 		return err
 	}
-	s.audit(ctx, model.AuditEvent{
-		Type: "qr.created", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r),
-		DirectoryID: qr.DirectoryID, VideoID: qr.VideoID, QrCodeID: &qr.ID,
-	}, map[string]any{"expiresAt": model.ISOPtr(qr.ExpiresAt)})
 	httpx.WriteJSON(w, http.StatusCreated, qr.ToInfo())
 	return nil
 }
@@ -151,10 +147,6 @@ func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request, u *model.Us
 		if err := s.st.RevokeQrCode(ctx, id, time.Now()); err != nil {
 			return err
 		}
-		s.audit(ctx, model.AuditEvent{
-			Type: "qr.revoked", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r),
-			DirectoryID: qr.DirectoryID, VideoID: qr.VideoID, QrCodeID: &qr.ID,
-		}, nil)
 		if qr, err = s.st.GetQrCode(ctx, id); err != nil {
 			return err
 		}

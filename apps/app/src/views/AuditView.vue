@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import type { AuditEventInfo } from '@wcs/shared'
+import type { AuditEventInfo } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { formatDateTime } from '@/utils/format'
 import Icon from '@/components/Icon.vue'
@@ -32,26 +32,17 @@ async function loadMore() {
 onMounted(loadMore)
 
 function describe(e: AuditEventInfo): string {
-  const what = e.videoId ? 'a video' : e.directoryId ? 'a folder' : 'an item'
+  const what = e.videoId ? 'a video' : 'a folder'
+  const who = e.subject?.name ?? 'Someone'
   switch (e.type) {
     case 'access.granted':
-      return `${e.subject?.name ?? 'Someone'} gained access to ${what} by scanning a QR code`
+      return `${who} gained access to ${what} by scanning a QR code`
     case 'access.revoked':
-      return `Access to ${what} was revoked for ${e.subject?.name ?? 'a user'}`
+      return `Access to ${what} was revoked for ${who}`
     case 'qr.created':
       return `QR code generated for ${what}`
     case 'qr.revoked':
       return `QR code revoked for ${what}`
-    case 'video.deleted':
-      return 'Video deleted'
-    case 'video.moved':
-      return 'Video moved'
-    case 'directory.moved':
-      return 'Folder moved'
-    case 'directory.deleted':
-      return 'Folder deleted'
-    default:
-      return e.type
   }
 }
 </script>

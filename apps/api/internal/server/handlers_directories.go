@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -16,23 +17,9 @@ func validName(s *string, max int) (*string, error) {
 	}
 	n := strings.TrimSpace(*s)
 	if n == "" || utf8.RuneCountInString(n) > max {
-		return nil, httpx.BadRequest("name must be 1 to " + itoa(max) + " characters")
+		return nil, httpx.BadRequest(fmt.Sprintf("name must be 1 to %d characters", max))
 	}
 	return &n, nil
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }
 
 type createDirectoryRequest struct {
@@ -114,11 +101,6 @@ func (s *Server) patchDirectory(w http.ResponseWriter, r *http.Request, u *model
 	if err != nil {
 		return err
 	}
-	if req.ParentID != nil && *req.ParentID != *dir.ParentID {
-		s.audit(ctx, model.AuditEvent{
-			Type: "directory.moved", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r), DirectoryID: &dir.ID,
-		}, map[string]any{"from": *dir.ParentID, "to": *req.ParentID})
-	}
 	httpx.WriteJSON(w, http.StatusOK, updated.ToRecord())
 	return nil
 }
@@ -177,25 +159,15 @@ func (s *Server) deleteDirectory(w http.ResponseWriter, r *http.Request, u *mode
 		}
 	} else {
 		for _, v := range videos {
-			if v.VimeoID != nil {
-				if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil {
-					s.log.Warn("vimeo delete failed; removing local record anyway", "video", v.ID, "err", err)
-				}
-			}
-			if err := s.st.DeleteVideo(ctx, v.ID); err != nil {
+			if err := s.deleteVideoEverywhere(ctx, &v); err != nil {
 				return err
 			}
-			vid := v.ID
-			s.audit(ctx, model.AuditEvent{Type: "video.deleted", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r), VideoID: &vid}, nil)
 		}
 	}
 
 	if err := s.st.DeleteDirectory(ctx, dir.ID); err != nil {
 		return err
 	}
-	s.audit(ctx, model.AuditEvent{
-		Type: "directory.deleted", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r), DirectoryID: &dir.ID,
-	}, map[string]any{"mode": mode, "videos": len(videos)})
 	httpx.WriteJSON(w, http.StatusNoContent, nil)
 	return nil
 }

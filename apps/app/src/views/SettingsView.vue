@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import type { UserRole } from '@wcs/shared'
-import { api, errorMessage } from '@/services/api'
-import { authService } from '@/services/auth'
+import type { UserRole } from '@/types'
+import { errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import Icon from '@/components/Icon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -69,16 +68,6 @@ function cancelViewer() {
   role.value = 'creator'
 }
 
-function onBanner(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0]
-  if (!f) return
-  void run(async () => auth.setMe(await api.me.setBanner(f)))
-}
-
-function clearBanner() {
-  void run(async () => auth.setMe(await api.me.clearBanner()))
-}
-
 async function signOut() {
   await auth.signOut()
   await router.replace({ name: 'sign-in' })
@@ -105,32 +94,18 @@ async function signOut() {
       <span class="muted small">Creators can upload, organize, and share videos.</span>
     </div>
 
-    <template v-if="auth.isCreator">
-      <div class="field">
-        <label for="banner">Banner</label>
-        <img v-if="auth.me.bannerUrl" :src="auth.me.bannerUrl" alt="Banner" class="banner" />
-        <input id="banner" type="file" accept="image/png,image/jpeg,image/webp" :disabled="busy" @change="onBanner" />
-        <span class="muted small">Shown in place of your name in the library. PNG, JPEG, or WebP up to 5 MB.</span>
-        <button v-if="auth.me.bannerUrl" type="button" class="btn ghost" :disabled="busy" @click="clearBanner">Remove banner</button>
-      </div>
-
-      <ul class="list">
-        <li class="row clickable" role="button" tabindex="0" @click="router.push({ name: 'audit' })" @keydown.enter="router.push({ name: 'audit' })">
-          <span class="lead"><Icon name="list" /></span>
-          <div class="grow"><div class="title">Audit log</div><div class="sub">Who gained or lost access, and when</div></div>
-          <span class="lead"><Icon name="chevron-right" /></span>
-        </li>
-      </ul>
-    </template>
+    <ul v-if="auth.isCreator" class="list">
+      <li class="row clickable" role="button" tabindex="0" @click="router.push({ name: 'audit' })" @keydown.enter="router.push({ name: 'audit' })">
+        <span class="lead"><Icon name="list" /></span>
+        <div class="grow"><div class="title">Audit log</div><div class="sub">Who gained or lost access, and when</div></div>
+        <span class="lead"><Icon name="chevron-right" /></span>
+      </li>
+    </ul>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-else-if="saved" class="muted small">Saved.</p>
 
     <button type="button" class="btn block" style="margin-top: 24px" @click="signOut"><Icon name="signout" /> Sign out</button>
-
-    <p v-if="authService.isDev" class="muted small" style="margin-top: 24px">
-      Development mode: acting as {{ authService.getDevEmail() }}. Sign out to switch user.
-    </p>
 
     <ConfirmDialog
       :open="confirmViewer"

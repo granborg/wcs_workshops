@@ -21,7 +21,7 @@ func (s *Server) listLibrary(w http.ResponseWriter, r *http.Request, u *model.Us
 			return err
 		}
 		if root != nil {
-			out = append(out, s.creatorSummary(u, root.ID, u.ID))
+			out = append(out, creatorSummary(u, root.ID, u.ID))
 		}
 	}
 
@@ -29,23 +29,20 @@ func (s *Server) listLibrary(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err != nil {
 		return err
 	}
-	others := ids[:0]
-	for _, id := range ids {
-		if id != u.ID {
-			others = append(others, id)
-		}
-	}
-	creators, err := s.st.ListUsersByIDs(ctx, others)
+	creators, err := s.st.ListUsersByIDs(ctx, ids)
 	if err != nil {
 		return err
 	}
 	for i := range creators {
+		if creators[i].ID == u.ID {
+			continue
+		}
 		root, err := s.st.RootDirectory(ctx, creators[i].ID)
 		if err != nil {
 			return err
 		}
 		if root != nil {
-			out = append(out, s.creatorSummary(&creators[i], root.ID, u.ID))
+			out = append(out, creatorSummary(&creators[i], root.ID, u.ID))
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -88,7 +85,7 @@ func (s *Server) getLibraryTree(w http.ResponseWriter, r *http.Request, u *model
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, model.LibraryTree{
-		Creator:   s.creatorSummary(creator, col.Root.ID, u.ID),
+		Creator:   creatorSummary(creator, col.Root.ID, u.ID),
 		CanManage: own,
 		Root:      col.BuildTree(grants),
 	})

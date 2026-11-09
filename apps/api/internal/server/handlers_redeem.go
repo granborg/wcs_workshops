@@ -42,9 +42,8 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request, u *model.User) e
 	if len(raw) < 8 || len(raw) > 200 {
 		return httpx.BadRequest("code must be 8 to 200 characters")
 	}
-	code := extractCode(raw)
 
-	qr, err := s.st.GetQrCodeByCode(ctx, code)
+	qr, err := s.st.GetQrCodeByCode(ctx, extractCode(raw))
 	if errors.Is(err, store.ErrNotFound) || (err == nil && qr.RevokedAt != nil) {
 		return httpx.NotFound("QR code")
 	}
@@ -75,32 +74,14 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request, u *model.User) e
 		return err
 	}
 	if existing == nil {
-		g, err := s.st.CreateGrant(ctx, u.ID, qr.DirectoryID, qr.VideoID, &qr.ID)
-		if err != nil {
+		// The grant row is also the audit record: who, when, from which IP, with which code.
+		if _, err := s.st.CreateGrant(ctx, u.ID, qr.CreatorID, qr.DirectoryID, qr.VideoID, &qr.ID, clientIP(r)); err != nil {
 			return err
 		}
-		s.audit(ctx, model.AuditEvent{
-			Type: "access.granted", CreatorID: qr.CreatorID, ActorID: &u.ID, SubjectID: &u.ID, IP: clientIP(r),
-			DirectoryID: qr.DirectoryID, VideoID: qr.VideoID, QrCodeID: &qr.ID,
-		}, map[string]any{"grantId": g.ID})
-
-		what := "a video"
-		data := map[string]string{"creatorId": qr.CreatorID}
-		if qr.DirectoryID != nil {
-			what = "a folder"
-			data["directoryId"] = *qr.DirectoryID
-		} else if qr.VideoID != nil {
-			data["videoId"] = *qr.VideoID
-		}
-		go func(userID, body string) {
-			bg, cancel := background()
-			defer cancel()
-			s.notifier.NotifyUser(bg, userID, "New access", body, data)
-		}(u.ID, creator.Name+" shared "+what+" with you")
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, model.RedeemResult{
-		Creator:     s.creatorSummary(creator, root.ID, u.ID),
+		Creator:     creatorSummary(creator, root.ID, u.ID),
 		DirectoryID: qr.DirectoryID,
 		VideoID:     qr.VideoID,
 		Added:       existing == nil,

@@ -1,4 +1,4 @@
-import type { DirectoryNode } from '@wcs/shared'
+import type { DirectoryNode } from '@/types'
 
 export function findNode(root: DirectoryNode, id: string): DirectoryNode | null {
   if (root.id === id) return root

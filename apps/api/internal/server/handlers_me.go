@@ -2,29 +2,16 @@ package server
 
 import (
 	"context"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/google/uuid"
 
 	"github.com/granborg/wcs_workshops/apps/api/internal/httpx"
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
 )
 
-const maxBannerBytes = 5 << 20
-
-var bannerExt = map[string]string{
-	"image/png":  ".png",
-	"image/jpeg": ".jpg",
-	"image/webp": ".webp",
-}
-
 func (s *Server) toMe(ctx context.Context, u *model.User) (*model.Me, error) {
-	me := &model.Me{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role, BannerURL: s.bannerURL(u.BannerURL)}
+	me := &model.Me{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role}
 	if u.Role == model.RoleCreator {
 		root, err := s.st.RootDirectory(ctx, u.ID)
 		if err != nil {
@@ -99,66 +86,6 @@ func (s *Server) patchMe(w http.ResponseWriter, r *http.Request, u *model.User) 
 		return err
 	}
 	me, err := s.toMe(ctx, updated)
-	if err != nil {
-		return err
-	}
-	httpx.WriteJSON(w, http.StatusOK, me)
-	return nil
-}
-
-func (s *Server) removeBannerFile(path *string) {
-	if path == nil || !strings.HasPrefix(*path, "/static/") {
-		return
-	}
-	_ = os.Remove(filepath.Join(s.cfg.UploadDir, filepath.Base(*path)))
-}
-
-func (s *Server) putBanner(w http.ResponseWriter, r *http.Request, u *model.User) error {
-	if err := requireCreator(u); err != nil {
-		return err
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBannerBytes+64<<10)
-	if err := r.ParseMultipartForm(maxBannerBytes); err != nil {
-		return httpx.BadRequest("Banner must be an image of 5 MB or smaller")
-	}
-	f, _, err := r.FormFile("file")
-	if err != nil {
-		return httpx.BadRequest("No file uploaded")
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-	ext, ok := bannerExt[http.DetectContentType(data)]
-	if !ok {
-		return httpx.BadRequest("Banner must be PNG, JPEG, or WebP")
-	}
-	name := u.ID + "-" + uuid.NewString() + ext
-	if err := os.WriteFile(filepath.Join(s.cfg.UploadDir, name), data, 0o644); err != nil {
-		return err
-	}
-	s.removeBannerFile(u.BannerURL)
-	url := "/static/" + name
-	updated, err := s.st.SetBanner(r.Context(), u.ID, &url)
-	if err != nil {
-		return err
-	}
-	me, err := s.toMe(r.Context(), updated)
-	if err != nil {
-		return err
-	}
-	httpx.WriteJSON(w, http.StatusOK, me)
-	return nil
-}
-
-func (s *Server) deleteBanner(w http.ResponseWriter, r *http.Request, u *model.User) error {
-	s.removeBannerFile(u.BannerURL)
-	updated, err := s.st.SetBanner(r.Context(), u.ID, nil)
-	if err != nil {
-		return err
-	}
-	me, err := s.toMe(r.Context(), updated)
 	if err != nil {
 		return err
 	}

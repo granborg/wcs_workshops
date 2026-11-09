@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Upload } from 'tus-js-client'
-import type { LibraryTree } from '@wcs/shared'
+import type { LibraryTree } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { flatten } from '@/utils/tree'
