@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+*-service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# databases and uploaded files (local dev)
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/uploads/
+
+# editor and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*

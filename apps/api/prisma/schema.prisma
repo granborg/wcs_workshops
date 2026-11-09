@@ -1,0 +1,142 @@
+// WCS Workshops data model. SQLite in development; switch provider to postgresql for production.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  /// Identity provider subject (Firebase uid, or "dev:<email>" with the dev bypass).
+  authUid   String   @unique
+  email     String?
+  name      String
+  /// "viewer" | "creator"
+  role      String   @default("viewer")
+  bannerUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  directories Directory[]
+  videos      Video[]
+  qrCodes     QrCode[]
+  grants      AccessGrant[]
+  devices     Device[]
+}
+
+model Directory {
+  id        String      @id @default(uuid())
+  ownerId   String
+  owner     User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Null for the creator's root directory.
+  parentId  String?
+  parent    Directory?  @relation("DirectoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Directory[] @relation("DirectoryTree")
+  name      String
+  createdAt DateTime    @default(now())
+
+  videos  Video[]
+  qrCodes QrCode[]
+  grants  AccessGrant[]
+
+  @@index([ownerId])
+  @@index([parentId])
+}
+
+model Video {
+  id          String    @id @default(uuid())
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  directoryId String
+  directory   Directory @relation(fields: [directoryId], references: [id], onDelete: Restrict)
+  title       String
+  /// Numeric id from the Vimeo uri "/videos/123".
+  vimeoId     String?   @unique
+  /// Unlisted hash, when privacy mode is unlisted.
+  vimeoHash   String?
+  /// "uploading" | "processing" | "ready" | "failed"
+  status      String    @default("uploading")
+  durationSec Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  qrCodes QrCode[]
+  grants  AccessGrant[]
+
+  @@index([directoryId])
+  @@index([ownerId])
+}
+
+model QrCode {
+  id          String     @id @default(uuid())
+  /// Random token encoded in the QR image.
+  code        String     @unique
+  creatorId   String
+  creator     User       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  directoryId String?
+  directory   Directory? @relation(fields: [directoryId], references: [id], onDelete: Cascade)
+  videoId     String?
+  video       Video?     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime   @default(now())
+
+  grants AccessGrant[]
+
+  @@index([directoryId])
+  @@index([videoId])
+}
+
+model AccessGrant {
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  directoryId String?
+  directory   Directory? @relation(fields: [directoryId], references: [id], onDelete: Cascade)
+  videoId     String?
+  video       Video?     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  qrCodeId    String?
+  qrCode      QrCode?    @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  revokedAt   DateTime?
+
+  @@index([userId])
+  @@index([directoryId])
+  @@index([videoId])
+}
+
+model Device {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushToken String   @unique
+  /// "ios" | "android" | "web"
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid())
+  at          DateTime @default(now())
+  type        String
+  /// Whose collection this event belongs to.
+  creatorId   String
+  /// Who performed the action.
+  actorId     String?
+  /// Who was affected (the viewer granted or revoked).
+  subjectId   String?
+  ip          String?
+  directoryId String?
+  videoId     String?
+  qrCodeId    String?
+  /// JSON string with extra context.
+  detail      String?
+
+  @@index([creatorId, at])
+}
