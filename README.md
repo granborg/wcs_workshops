@@ -44,8 +44,11 @@ npm run build                      # builds the web app, embeds it, compiles app
 
 The binary serves the web app at `/` and the API at `/api`. It needs the `.env` values (or real environment
 variables) and a writable directory for `DATABASE_PATH`. For real sign-in, set `GOOGLE_APPLICATION_CREDENTIALS`
-to a Firebase service account file, unset `FIREBASE_AUTH_EMULATOR_HOST`, and fill the `VITE_FIREBASE_*` values
-before building. SQLite means one API process per database file: run a single instance and back up the file.
+to a Firebase service account file (or `FIREBASE_CREDENTIALS_JSON` to its contents), unset
+`FIREBASE_AUTH_EMULATOR_HOST`, and fill the `VITE_FIREBASE_*` values before building. SQLite means one API
+process per database file: run a single instance and back up the file.
+
+**Fly.io:** `Dockerfile` and `fly.toml` are ready. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Mobile builds
 
