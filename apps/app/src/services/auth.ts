@@ -1,9 +1,14 @@
 /**
- * Identity provider adapter. Two implementations:
- *  - dev:      VITE_DEV_AUTH=true. Sends an x-dev-user header; the API must run with DEV_AUTH_BYPASS=true.
- *  - firebase: Google, Apple, and Microsoft sign-in through Firebase Authentication. Uses the Capacitor
- *              Firebase plugin so the same code runs on web and in the native shells.
+ * Identity provider adapter. Three implementations, chosen at startup:
+ *  - dev:    VITE_DEV_AUTH=true. Sends an X-Dev-User header; the API must run with DEV_AUTH_BYPASS=true.
+ *  - web:    FirebaseUI v7 core (@firebase-oss/ui-core) over the Firebase JS SDK. Runs in browsers.
+ *  - native: Capacitor Firebase Authentication plugin. Runs inside the iOS and Android shells, where
+ *            Google refuses OAuth in embedded WebViews, so the native provider SDKs are required.
+ *
+ * All three produce a Firebase ID token (or the dev header) that the API verifies.
  */
+
+import { Capacitor } from '@capacitor/core'
 
 export type Provider = 'google' | 'apple' | 'microsoft'
 
@@ -17,6 +22,30 @@ export interface AuthService {
   setDevEmail(email: string): void
   getDevEmail(): string
 }
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+}
+
+async function firebaseApp() {
+  const { getApps, initializeApp } = await import('firebase/app')
+  return getApps()[0] ?? initializeApp(firebaseConfig)
+}
+
+const noDev = {
+  setDevEmail() {
+    // not applicable outside dev mode
+  },
+  getDevEmail() {
+    return ''
+  },
+}
+
+/* ---------------- dev ---------------- */
 
 const DEV_EMAIL_KEY = 'wcsw.devEmail'
 const DEV_SIGNED_IN_KEY = 'wcsw.devSignedIn'
@@ -51,7 +80,7 @@ const devAuth: AuthService = {
     safeSet(DEV_SIGNED_IN_KEY, null)
   },
   async getHeaders() {
-    return { 'x-dev-user': this.getDevEmail() }
+    return { 'X-Dev-User': this.getDevEmail() }
   },
   setDevEmail(email: string) {
     safeSet(DEV_EMAIL_KEY, email.trim().toLowerCase())
@@ -61,57 +90,109 @@ const devAuth: AuthService = {
   },
 }
 
-let firebaseReady: Promise<typeof import('@capacitor-firebase/authentication')> | null = null
+/* ---------------- web: FirebaseUI core ---------------- */
 
-async function firebase() {
-  if (!firebaseReady) {
-    firebaseReady = (async () => {
-      const { initializeApp, getApps } = await import('firebase/app')
-      if (getApps().length === 0) {
-        initializeApp({
-          apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-          authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-          projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-          appId: import.meta.env.VITE_FIREBASE_APP_ID,
-          messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-        })
-      }
-      return import('@capacitor-firebase/authentication')
-    })()
-  }
-  return firebaseReady
+type WebUI = {
+  ui: import('@firebase-oss/ui-core').FirebaseUIStore
+  auth: import('firebase/auth').Auth
 }
 
-const firebaseAuth: AuthService = {
+let webUIPromise: Promise<WebUI> | null = null
+
+function webUI(): Promise<WebUI> {
+  webUIPromise ??= (async () => {
+    const app = await firebaseApp()
+    const { getAuth } = await import('firebase/auth')
+    const { initializeUI } = await import('@firebase-oss/ui-core')
+    const auth = getAuth(app)
+    // Default behaviors: popup OAuth strategy and reCAPTCHA config. Swap in providerRedirectStrategy()
+    // from @firebase-oss/ui-core if popups prove unreliable on mobile browsers.
+    const ui = initializeUI({ app, auth })
+    return { ui, auth }
+  })()
+  return webUIPromise
+}
+
+/** Resolves once Firebase has restored any persisted session. */
+function authReady(auth: import('firebase/auth').Auth): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = auth.onAuthStateChanged(() => {
+      stop()
+      resolve()
+    })
+  })
+}
+
+async function providerFor(p: Provider) {
+  const { GoogleAuthProvider, OAuthProvider } = await import('firebase/auth')
+  if (p === 'google') return new GoogleAuthProvider()
+  const provider = new OAuthProvider(p === 'apple' ? 'apple.com' : 'microsoft.com')
+  provider.addScope('email')
+  if (p === 'apple') provider.addScope('name')
+  return provider
+}
+
+const webAuth: AuthService = {
+  ...noDev,
   isDev: false,
   async isSignedIn() {
-    const { FirebaseAuthentication } = await firebase()
-    const { user } = await FirebaseAuthentication.getCurrentUser()
+    const { auth } = await webUI()
+    await authReady(auth)
+    return auth.currentUser !== null
+  },
+  async signIn(provider) {
+    const { ui } = await webUI()
+    const { signInWithProvider } = await import('@firebase-oss/ui-core')
+    // FirebaseUI wraps popup handling, pending-credential linking and error translation.
+    await signInWithProvider(ui.get(), await providerFor(provider))
+  },
+  async signOut() {
+    const { auth } = await webUI()
+    await auth.signOut()
+  },
+  async getHeaders() {
+    const { auth } = await webUI()
+    await authReady(auth)
+    const token = await auth.currentUser?.getIdToken()
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  },
+}
+
+/* ---------------- native: Capacitor Firebase plugin ---------------- */
+
+async function nativePlugin() {
+  await firebaseApp()
+  const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
+  return FirebaseAuthentication
+}
+
+const nativeAuth: AuthService = {
+  ...noDev,
+  isDev: false,
+  async isSignedIn() {
+    const { user } = await (await nativePlugin()).getCurrentUser()
     return user !== null
   },
   async signIn(provider) {
-    const { FirebaseAuthentication } = await firebase()
-    if (provider === 'google') await FirebaseAuthentication.signInWithGoogle()
-    else if (provider === 'apple') await FirebaseAuthentication.signInWithApple()
-    else await FirebaseAuthentication.signInWithMicrosoft()
+    const plugin = await nativePlugin()
+    if (provider === 'google') await plugin.signInWithGoogle()
+    else if (provider === 'apple') await plugin.signInWithApple()
+    else await plugin.signInWithMicrosoft()
   },
   async signOut() {
-    const { FirebaseAuthentication } = await firebase()
-    await FirebaseAuthentication.signOut()
+    await (await nativePlugin()).signOut()
   },
   async getHeaders() {
-    const { FirebaseAuthentication } = await firebase()
-    const { token } = await FirebaseAuthentication.getIdToken()
+    const { token } = await (await nativePlugin()).getIdToken()
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
     return headers
   },
-  setDevEmail() {
-    // not applicable
-  },
-  getDevEmail() {
-    return ''
-  },
 }
 
-export const authService: AuthService = import.meta.env.VITE_DEV_AUTH === 'true' ? devAuth : firebaseAuth
+function pick(): AuthService {
+  if (import.meta.env.VITE_DEV_AUTH === 'true') return devAuth
+  return Capacitor.isNativePlatform() ? nativeAuth : webAuth
+}
+
+export const authService: AuthService = pick()

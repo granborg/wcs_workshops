@@ -1,0 +1,164 @@
+package server
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/granborg/wcs_workshops/apps/api/internal/httpx"
+	"github.com/granborg/wcs_workshops/apps/api/internal/model"
+	"github.com/granborg/wcs_workshops/apps/api/internal/store"
+)
+
+// target picks exactly one of directoryId / videoId from JSON or query values.
+func parseTarget(directoryID, videoID *string) (*string, *string, error) {
+	if directoryID != nil && *directoryID == "" {
+		directoryID = nil
+	}
+	if videoID != nil && *videoID == "" {
+		videoID = nil
+	}
+	if (directoryID == nil) == (videoID == nil) {
+		return nil, nil, httpx.BadRequest("Provide exactly one of directoryId or videoId")
+	}
+	if directoryID != nil && !isUUID(*directoryID) {
+		return nil, nil, httpx.NotFound("Directory")
+	}
+	if videoID != nil && !isUUID(*videoID) {
+		return nil, nil, httpx.NotFound("Video")
+	}
+	return directoryID, videoID, nil
+}
+
+func queryTarget(q url.Values) (*string, *string, error) {
+	d, v := q.Get("directoryId"), q.Get("videoId")
+	return parseTarget(&d, &v)
+}
+
+func (s *Server) assertOwnedTarget(ctx context.Context, u *model.User, directoryID, videoID *string) error {
+	if directoryID != nil {
+		_, err := s.ownedDirectory(ctx, u, *directoryID)
+		return err
+	}
+	_, err := s.ownedVideo(ctx, u, *videoID)
+	return err
+}
+
+type createShareRequest struct {
+	DirectoryID *string `json:"directoryId"`
+	VideoID     *string `json:"videoId"`
+	ExpiresAt   *string `json:"expiresAt"`
+}
+
+func randomCode() (string, error) {
+	b := make([]byte, 18)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// createShare creates a QR code for a directory or video, with an optional expiry.
+func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	if err := requireCreator(u); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	var req createShareRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	dirID, vidID, err := parseTarget(req.DirectoryID, req.VideoID)
+	if err != nil {
+		return err
+	}
+	if err := s.assertOwnedTarget(ctx, u, dirID, vidID); err != nil {
+		return err
+	}
+	var expires *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			return httpx.BadRequest("expiresAt must be an RFC 3339 timestamp")
+		}
+		if !t.After(time.Now()) {
+			return httpx.BadRequest("Expiration must be in the future")
+		}
+		expires = &t
+	}
+	code, err := randomCode()
+	if err != nil {
+		return err
+	}
+	qr, err := s.st.CreateQrCode(ctx, code, u.ID, dirID, vidID, expires)
+	if err != nil {
+		return err
+	}
+	s.audit(ctx, model.AuditEvent{
+		Type: "qr.created", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r),
+		DirectoryID: qr.DirectoryID, VideoID: qr.VideoID, QrCodeID: &qr.ID,
+	}, map[string]any{"expiresAt": model.ISOPtr(qr.ExpiresAt)})
+	httpx.WriteJSON(w, http.StatusCreated, qr.ToInfo())
+	return nil
+}
+
+// listShare returns QR codes for a directory or video, newest first.
+func (s *Server) listShare(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	if err := requireCreator(u); err != nil {
+		return err
+	}
+	dirID, vidID, err := queryTarget(r.URL.Query())
+	if err != nil {
+		return err
+	}
+	if err := s.assertOwnedTarget(r.Context(), u, dirID, vidID); err != nil {
+		return err
+	}
+	codes, err := s.st.ListQrCodes(r.Context(), u.ID, dirID, vidID)
+	if err != nil {
+		return err
+	}
+	out := make([]model.QrCodeInfo, len(codes))
+	for i, c := range codes {
+		out[i] = c.ToInfo()
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+	return nil
+}
+
+// revokeShare revokes a QR code. Grants already redeemed with it stay in place.
+func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	if err := requireCreator(u); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	id := r.PathValue("id")
+	if !isUUID(id) {
+		return httpx.NotFound("QR code")
+	}
+	qr, err := s.st.GetQrCode(ctx, id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && qr.CreatorID != u.ID) {
+		return httpx.NotFound("QR code")
+	}
+	if err != nil {
+		return err
+	}
+	if qr.RevokedAt == nil {
+		if err := s.st.RevokeQrCode(ctx, id, time.Now()); err != nil {
+			return err
+		}
+		s.audit(ctx, model.AuditEvent{
+			Type: "qr.revoked", CreatorID: u.ID, ActorID: &u.ID, IP: clientIP(r),
+			DirectoryID: qr.DirectoryID, VideoID: qr.VideoID, QrCodeID: &qr.ID,
+		}, nil)
+		if qr, err = s.st.GetQrCode(ctx, id); err != nil {
+			return err
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, qr.ToInfo())
+	return nil
+}
