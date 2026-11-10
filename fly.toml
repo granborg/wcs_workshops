@@ -1,36 +1,47 @@
-# fly.toml app configuration file generated for wcs-workshops on 2026-11-10T00:37:52Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# Fly.io configuration. One machine, one volume: SQLite needs a single writer.
+# First deploy: see docs/DEPLOY.md.
 
-app = 'wcs-workshops'
-primary_region = 'ord'
+app = "wcs-workshops"
+primary_region = "iad"
 
 [build]
+  # Firebase web config (public). Fill in from Firebase console > Project settings > Your apps.
+  [build.args]
+    VITE_FIREBASE_API_KEY = "AIzaSyCzBZgEc7CMcPjtD_9pfQTk_wbOOafMxnI"
+    VITE_FIREBASE_AUTH_DOMAIN = "wcs-workshops.firebaseapp.com"
+    VITE_FIREBASE_PROJECT_ID = "wcs-workshops"
+    VITE_FIREBASE_APP_ID = "1:821837247306:web:7b1428ff23ea8b204107b3"
+    VITE_FIREBASE_MESSAGING_SENDER_ID = "821837247306"
+
 [env]
-  CORS_ORIGINS = 'capacitor://localhost,http://localhost'
-  DATABASE_PATH = '/data/wcs.db'
-  FIREBASE_PROJECT_ID = ''
-  VIMEO_PRIVACY = 'unlisted'
+  DATABASE_PATH = "/data/wcs.db"
+  FIREBASE_PROJECT_ID = ""
+  VIMEO_PRIVACY = "unlisted"
+  # Only the Capacitor shells are cross-origin; the web app is served by this binary.
+  CORS_ORIGINS = "capacitor://localhost,http://localhost"
+
+# Secrets, set with `fly secrets set`: VIMEO_ACCESS_TOKEN, FIREBASE_CREDENTIALS_JSON
 
 [[mounts]]
-  source = 'data'
-  destination = '/data'
+  source = "wcs_data"
+  destination = "/data"
+  initial_size = "1gb"
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'off'
+  # Keep exactly one machine running: SQLite on a volume cannot be shared.
+  auto_stop_machines = "off"
   auto_start_machines = true
   min_machines_running = 1
 
   [[http_service.checks]]
-    interval = '30s'
-    timeout = '5s'
-    grace_period = '10s'
-    method = 'GET'
-    path = '/api/health'
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
 
 [[vm]]
-  size = 'shared-cpu-1x'
-  memory = '256mb'
+  size = "shared-cpu-1x"
+  memory = "256mb"
