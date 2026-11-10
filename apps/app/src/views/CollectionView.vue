@@ -130,6 +130,7 @@ const menuItems = computed<MenuItem[]>(() => {
   }
   // Folder changes and admins are for the owner only.
   if (!canManage.value) return items
+  items.unshift({ label: 'New folder', icon: 'pi pi-folder-plus', command: () => (dialog.value = 'newFolder') }, { separator: true })
   items.push({ label: 'Admins', icon: 'pi pi-user-edit', command: () => (dialog.value = 'admins') })
   // The root folder is the collection itself: it cannot be renamed, moved or deleted.
   if (s.id === tree.value?.root.id) return items
@@ -200,8 +201,9 @@ function rename(name: string) {
   void run(() => (s.kind === 'directory' ? api.directories.rename(s.id, name) : api.videos.rename(s.id, name)))
 }
 
+// The new folder goes into the folder whose menu was used.
 function createFolder(name: string) {
-  const parent = currentId.value
+  const parent = selected.value?.kind === 'directory' ? selected.value.id : currentId.value
   if (!parent) return
   void run(() => api.directories.create(name, parent))
 }
@@ -233,33 +235,14 @@ function dirName(node: DirectoryNode) {
       <div class="page-head">
         <h2>{{ dirName(current) }}</h2>
         <Button
-          v-if="canManage"
-          label="New folder"
-          icon="pi pi-folder-plus"
+          v-if="canManageHere"
+          icon="pi pi-ellipsis-v"
           severity="secondary"
-          outlined
-          size="small"
-          @click="dialog = 'newFolder'"
+          text
+          rounded
+          aria-label="Folder options"
+          @click="openMenu($event, 'directory', current.id, dirName(current), current.parentId ?? current.id)"
         />
-        <template v-if="canManageHere">
-          <Button
-            as="router-link"
-            :to="{ name: 'upload', query: { creator: creatorId, dir: current.id } }"
-            label="Add video"
-            icon="pi pi-upload"
-            severity="secondary"
-            outlined
-            size="small"
-          />
-          <Button
-            icon="pi pi-ellipsis-v"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Folder options"
-            @click="openMenu($event, 'directory', current.id, dirName(current), current.parentId ?? current.id)"
-          />
-        </template>
       </div>
       <p v-if="canManage && crumbs.length <= 1" class="hint">You manage this collection.</p>
       <p v-else-if="canManageHere && !canManage" class="hint">You are an admin of this folder.</p>
@@ -403,7 +386,6 @@ function dirName(node: DirectoryNode) {
 .head .hint {
   margin-top: 4px;
 }
-
 :deep(.p-breadcrumb-list) {
   flex-wrap: wrap;
 }

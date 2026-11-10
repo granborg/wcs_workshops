@@ -80,6 +80,8 @@
       <h2><i class="pi pi-ellipsis-v" aria-hidden="true" /> Options for each folder and video</h2>
       <p>Each folder and each video in your collection has an options button with these choices:</p>
       <dl>
+        <dt>New folder (folders, owner only)</dt>
+        <dd>Creates a folder inside this folder.</dd>
         <dt>Share (QR code)</dt>
         <dd>Opens a QR code for the folder or video. If one was already created, you can show, print, or copy the link of the existing one. You can also generate a new one and optionally set an expiration date and time. The QR code grants any user who scans it access to that folder or video. It is added to their library.</dd>
         <dt>View / edit access</dt>
