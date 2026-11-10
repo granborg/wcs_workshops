@@ -1,5 +1,4 @@
 # Fly.io configuration. One machine, one volume: SQLite needs a single writer.
-# First deploy: see docs/DEPLOY.md.
 
 app = "wcs-workshops"
 primary_region = "ord"

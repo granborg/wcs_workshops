@@ -40,7 +40,7 @@ const ICONS: Record<AuditEventInfo['type'], string> = {
 }
 
 function describe(e: AuditEventInfo): string {
-  const what = e.videoId ? 'a video' : 'a folder'
+  const what = `${e.videoId ? 'the video' : 'the folder'} "${e.targetName}"`
   const who = e.subject?.name ?? 'Someone'
   switch (e.type) {
     case 'access.granted':

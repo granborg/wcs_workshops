@@ -1,4 +1,4 @@
-// Package access resolves who may see what. See docs/ARCHITECTURE.md, "Access model".
+// Package access resolves who may see what.
 package access
 
 import (

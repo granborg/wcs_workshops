@@ -22,6 +22,7 @@
       <h2><i class="pi pi-book" aria-hidden="true" /> Library</h2>
       <p>The library is the main page. It is a list of all of the creators who have shared with you. Clicking on each opens that creator's collection of videos.</p>
       <p>The videos under each creator are organized in whatever way the creator has organized their own videos.</p>
+      <p>A video with the tag "Not uploaded yet" is a placeholder: the creator has shared it but has not uploaded the file yet. It plays when the creator uploads it. You do not have to scan the code again.</p>
       <p>If you are a creator, your own collection shows in bold, and you have administrative options for all of the videos and folders in it.</p>
     </section>
 
@@ -48,7 +49,15 @@
 
     <section class="card">
       <h2><i class="pi pi-upload" aria-hidden="true" /> Upload</h2>
-      <p>This is where you upload a video and choose its destination folder. The file goes directly from your device to Vimeo, which hosts the videos. Keep the app open until the upload finishes.</p>
+      <p>This is where you add a video to a folder in your collection. At the top, choose <strong>Upload now</strong> or <strong>Placeholder</strong>.</p>
+
+      <h3>Upload now</h3>
+      <p>Choose the video file, a title, and the destination folder. The file goes directly from your device to Vimeo, which hosts the videos. Keep the app open until the upload finishes.</p>
+      <p>If an upload did not finish or failed, open the video and upload the file again on its page.</p>
+
+      <h3>Placeholder</h3>
+      <p>Use a placeholder when the video is not ready yet. A placeholder needs only a title and a folder. It shows in your collection with the tag "Not uploaded yet", and you can share it at once.</p>
+      <p>When the file is ready, open the placeholder and upload the file on its page. Everyone who already has access sees the video then, and you do not have to share it again. This is useful for giving people access to a workshop video at the time of the lesson, and then uploading it for everyone later.</p>
     </section>
 
     <section class="card">
@@ -101,6 +110,12 @@ section h2 {
   gap: 10px;
   font-size: 1.0625rem;
   margin-bottom: 10px;
+}
+
+section h3 {
+  margin: 16px 0 6px;
+  font-size: 0.9375rem;
+  font-weight: 600;
 }
 
 section h2 .pi {

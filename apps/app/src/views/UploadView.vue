@@ -1,29 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Upload } from 'tus-js-client'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
-import ProgressBar from 'primevue/progressbar'
+import SelectButton from 'primevue/selectbutton'
 import type { LibraryTree } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useVideoUpload } from '@/composables/useVideoUpload'
 import { flatten } from '@/utils/tree'
-import { formatBytes } from '@/utils/format'
 import FolderSelect from '@/components/FolderSelect.vue'
+import UploadProgress from '@/components/UploadProgress.vue'
+import VideoFilePicker from '@/components/VideoFilePicker.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const { phase, progress, busy: uploading, upload } = useVideoUpload()
+
+// "now" uploads a file. "later" makes a placeholder: it shows in the library and can be shared at once,
+// and the creator uploads the file from the video's page when it is ready.
+const modes = [
+  { label: 'Upload now', value: 'now' },
+  { label: 'Placeholder', value: 'later' },
+]
+const mode = ref<'now' | 'later'>('now')
 
 const tree = ref<LibraryTree | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
 const title = ref('')
 const directoryId = ref(typeof route.query.dir === 'string' ? route.query.dir : '')
-const progress = ref(0)
-const phase = ref<'idle' | 'reserving' | 'uploading' | 'finishing' | 'done'>('idle')
+const creating = ref(false)
 const error = ref<string | null>(null)
 
 const folders = computed(() =>
@@ -31,7 +39,8 @@ const folders = computed(() =>
     ? flatten(tree.value.root).map((d) => ({ id: d.id, depth: d.depth, label: d.depth === 0 ? tree.value!.creator.name : d.name }))
     : [],
 )
-const busy = computed(() => phase.value !== 'idle' && phase.value !== 'done')
+const busy = computed(() => uploading.value || creating.value)
+const canSubmit = computed(() => !!title.value.trim() && !!directoryId.value && (mode.value === 'later' || !!file.value))
 
 onMounted(async () => {
   if (!auth.me) return
@@ -43,41 +52,27 @@ onMounted(async () => {
   }
 })
 
-function onFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
-  if (file.value && !title.value) title.value = file.value.name.replace(/\.[^.]+$/, '')
-}
+// Suggest the file name as the title.
+watch(file, (f) => {
+  if (f && !title.value) title.value = f.name.replace(/\.[^.]+$/, '')
+})
 
 async function start() {
-  const f = file.value
-  if (!f || !title.value.trim() || !directoryId.value) return
+  if (!canSubmit.value) return
   error.value = null
-  progress.value = 0
-  phase.value = 'reserving'
   try {
-    const ticket = await api.videos.ticket(title.value.trim(), directoryId.value, f.size)
-    phase.value = 'uploading'
-    await new Promise<void>((resolve, reject) => {
-      const upload = new Upload(f, {
-        uploadUrl: ticket.uploadLink,
-        chunkSize: 50 * 1024 * 1024,
-        retryDelays: [0, 1000, 3000, 5000],
-        onError: reject,
-        onProgress: (sent, total) => {
-          progress.value = total > 0 ? Math.round((sent / total) * 100) : 0
-        },
-        onSuccess: () => resolve(),
-      })
-      upload.start()
-    })
-    phase.value = 'finishing'
-    await api.videos.complete(ticket.videoId)
-    phase.value = 'done'
+    if (mode.value === 'later') {
+      creating.value = true
+      await api.videos.placeholder(title.value.trim(), directoryId.value)
+    } else {
+      const t = title.value.trim()
+      await upload(file.value!, (size) => api.videos.ticket(t, directoryId.value, size))
+    }
     await router.push({ name: 'collection', params: { creatorId: auth.me!.id }, query: { dir: directoryId.value } })
   } catch (err) {
     error.value = errorMessage(err)
-    phase.value = 'idle'
+  } finally {
+    creating.value = false
   }
 }
 </script>
@@ -85,19 +80,24 @@ async function start() {
 <template>
   <form class="narrow card" @submit.prevent="start">
     <div class="field">
+      <SelectButton
+        v-model="mode"
+        :options="modes"
+        option-label="label"
+        option-value="value"
+        :allow-empty="false"
+        :disabled="busy"
+        aria-label="Upload now or create a placeholder"
+        fluid
+      />
+      <span v-if="mode === 'later'" class="hint">
+        A placeholder shows in your library now, and you can share it. Upload the file later from the video's page.
+      </span>
+    </div>
+
+    <div v-if="mode === 'now'" class="field">
       <label for="file">Video file</label>
-      <input id="file" ref="fileInput" type="file" accept="video/*" hidden :disabled="busy" @change="onFile" />
-      <button type="button" class="picker" :disabled="busy" @click="fileInput?.click()">
-        <i class="pi" :class="file ? 'pi-video' : 'pi-cloud-upload'" aria-hidden="true" />
-        <span v-if="file" class="picker-text">
-          <strong>{{ file.name }}</strong>
-          <span class="hint">{{ formatBytes(file.size) }} · tap to choose another file</span>
-        </span>
-        <span v-else class="picker-text">
-          <strong>Choose a video</strong>
-          <span class="hint">From this device's files or camera roll</span>
-        </span>
-      </button>
+      <VideoFilePicker v-model="file" input-id="file" :disabled="busy" />
     </div>
 
     <div class="field">
@@ -110,71 +110,20 @@ async function start() {
       <FolderSelect v-model="directoryId" :options="folders" input-id="dir" :disabled="busy || folders.length === 0" />
     </div>
 
-    <div v-if="busy" class="field">
-      <ProgressBar :value="progress" :mode="phase === 'uploading' ? 'determinate' : 'indeterminate'" style="height: 10px" />
-      <span class="hint">
-        <template v-if="phase === 'reserving'">Preparing upload…</template>
-        <template v-else-if="phase === 'uploading'">Uploading {{ progress }}%</template>
-        <template v-else>Finishing…</template>
-      </span>
-    </div>
+    <UploadProgress v-if="uploading" :phase="phase" :progress="progress" />
 
     <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
     <Button
       type="submit"
-      label="Upload"
-      icon="pi pi-upload"
+      :label="mode === 'later' ? 'Create placeholder' : 'Upload'"
+      :icon="mode === 'later' ? 'pi pi-clock' : 'pi pi-upload'"
       fluid
       :loading="busy"
-      :disabled="!file || !title.trim() || !directoryId"
+      :disabled="!canSubmit"
     />
-    <p class="hint" style="margin-top: 12px">
+    <p v-if="mode === 'now'" class="hint" style="margin: 12px 0 0">
       The file goes directly from this device to Vimeo. Keep the app open until the upload finishes.
     </p>
   </form>
 </template>
-
-<style scoped>
-.picker {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 18px 16px;
-  border: 1.5px dashed var(--p-content-border-color);
-  border-radius: var(--radius);
-  background: var(--p-content-background);
-  color: var(--p-text-color);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.picker:hover:not(:disabled) {
-  border-color: var(--p-primary-color);
-}
-
-.picker:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.picker .pi {
-  font-size: 1.75rem;
-  color: var(--p-primary-color);
-}
-
-.picker-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.picker-text strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>

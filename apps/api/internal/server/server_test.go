@@ -148,6 +148,40 @@ func TestDirectoryRules(t *testing.T) {
 	c.expect(400, creator, "POST", "/share", anyMap{"directoryId": f.season.ID, "expiresAt": "2000-01-01T00:00:00Z"})
 }
 
+// A placeholder is a video with no file. Viewers with access see it; only its creator can upload to it.
+func TestPlaceholder(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+
+	c.expect(403, viewer, "POST", "/videos/placeholder", anyMap{"title": "Later", "directoryId": f.root})
+	c.expect(400, creator, "POST", "/videos/placeholder", anyMap{"title": " ", "directoryId": f.season.ID})
+
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Week 2", "directoryId": f.season.ID}, &v)
+	if v.Status != model.StatusPlaceholder || v.OwnerID != f.me.ID {
+		t.Fatalf("placeholder = %+v", v)
+	}
+
+	var qr model.QrCodeInfo
+	c.must(creator, "POST", "/share", anyMap{"videoId": v.ID}, &qr)
+	c.must(viewer, "POST", "/redeem", anyMap{"code": qr.Code}, nil)
+
+	var seen model.VideoSummary
+	c.must(viewer, "GET", "/videos/"+v.ID, nil, &seen)
+	if seen.Status != model.StatusPlaceholder {
+		t.Fatalf("viewer sees status %q", seen.Status)
+	}
+	c.expect(400, viewer, "GET", "/videos/"+v.ID+"/playback", nil)
+	c.expect(403, viewer, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
+
+	c.expect(400, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 0})
+	c.expect(503, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
+	c.must(creator, "GET", "/videos/"+v.ID, nil, &seen)
+	if seen.Status != model.StatusPlaceholder {
+		t.Fatalf("failed ticket changed status to %q", seen.Status)
+	}
+}
+
 func TestShareRedeemAndPrunedLibrary(t *testing.T) {
 	c := newClient(t)
 	f := setup(t, c)
@@ -224,11 +258,29 @@ func TestRevokeAndAudit(t *testing.T) {
 	}
 	c.expect(404, viewer, "POST", "/redeem", anyMap{"code": qr.Code})
 
+	// Codes for the root folder and for a video, to check the names the audit log shows.
+	var rootQR, videoQR model.QrCodeInfo
+	var v model.VideoSummary
+	c.must(creator, "POST", "/share", anyMap{"directoryId": f.root}, &rootQR)
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Week 2", "directoryId": f.week.ID}, &v)
+	c.must(creator, "POST", "/share", anyMap{"videoId": v.ID}, &videoQR)
+
 	var audit []model.AuditEventInfo
 	c.must(creator, "GET", "/audit", nil, &audit)
 	got := map[string]model.AuditEventInfo{}
 	for _, e := range audit {
-		got[e.Type] = e
+		want := "Season 1"
+		switch {
+		case e.QrCodeID != nil && *e.QrCodeID == rootQR.ID:
+			want = "Smoke Creator" // a root folder shows as the creator's name
+		case e.QrCodeID != nil && *e.QrCodeID == videoQR.ID:
+			want = "Week 2"
+		default:
+			got[e.Type] = e
+		}
+		if e.TargetName != want {
+			t.Errorf("%s targetName = %q, want %q", e.Type, e.TargetName, want)
+		}
 	}
 	for _, want := range []string{"qr.created", "access.granted", "access.revoked", "qr.revoked"} {
 		if _, ok := got[want]; !ok {

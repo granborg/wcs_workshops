@@ -80,6 +80,11 @@ export const api = {
   videos: {
     ticket: (title: string, directoryId: string, sizeBytes: number) =>
       request<UploadTicket>('POST', '/videos/upload-ticket', { title, directoryId, sizeBytes }),
+    /** A video with no file yet. Upload to it later with ticketFor. */
+    placeholder: (title: string, directoryId: string) =>
+      request<VideoSummary>('POST', '/videos/placeholder', { title, directoryId }),
+    /** Upload ticket for an existing video: a placeholder, an upload that did not finish, or a failed video. */
+    ticketFor: (id: string, sizeBytes: number) => request<UploadTicket>('POST', `/videos/${id}/upload-ticket`, { sizeBytes }),
     complete: (id: string) => request<VideoSummary>('POST', `/videos/${id}/complete`),
     get: (id: string) => request<VideoSummary>('GET', `/videos/${id}`),
     playback: (id: string) => request<PlaybackInfo>('GET', `/videos/${id}/playback`),

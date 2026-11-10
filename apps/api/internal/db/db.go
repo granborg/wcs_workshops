@@ -2,6 +2,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -44,8 +45,29 @@ func Open(path string) (*sql.DB, error) {
 }
 
 // Migrate applies every migrations/*.sql file not yet recorded in schema_migrations, in name order.
+//
+// Each migration runs with foreign keys off, as the SQLite procedure for rebuilding a table requires
+// (https://www.sqlite.org/lang_altertable.html#otheralter). Otherwise DROP TABLE on a rebuilt table would
+// cascade deletes into the tables that reference it. PRAGMA foreign_key_check runs before commit, so a
+// migration that breaks a reference is rolled back.
 func Migrate(d *sql.DB) error {
-	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	ctx := context.Background()
+	// PRAGMA foreign_keys is per connection and has no effect inside a transaction: use one connection.
+	conn, err := d.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	// The connection goes back to the pool afterwards, so turn foreign keys on again in every case.
+	defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	return migrate(ctx, conn)
+}
+
+func migrate(ctx context.Context, d *sql.Conn) error {
+	if _, err := d.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    TEXT PRIMARY KEY,
 		applied_at INTEGER NOT NULL
 	)`); err != nil {
@@ -66,7 +88,7 @@ func Migrate(d *sql.DB) error {
 
 	for _, name := range names {
 		var applied int
-		if err := d.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, name).Scan(&applied); err != nil {
+		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, name).Scan(&applied); err != nil {
 			return err
 		}
 		if applied > 0 {
@@ -76,15 +98,19 @@ func Migrate(d *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		tx, err := d.Begin()
+		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(string(body)); err != nil {
+		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("migration %s: %w", name, err)
 		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, name, time.Now().UnixMilli()); err != nil {
+		if err := checkForeignKeys(ctx, tx); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, name, time.Now().UnixMilli()); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -93,4 +119,24 @@ func Migrate(d *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// checkForeignKeys returns an error when any row refers to a row that does not exist.
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowid sql.NullInt64
+		var parent string
+		var fkid int
+		if err := rows.Scan(&table, &rowid, &parent, &fkid); err != nil {
+			return err
+		}
+		return fmt.Errorf("foreign key violation: %s row %d refers to a missing %s row", table, rowid.Int64, parent)
+	}
+	return rows.Err()
 }

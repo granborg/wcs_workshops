@@ -72,6 +72,8 @@ func (s *Server) routes() {
 	m.Handle("DELETE /api/directories/{id}", a(s.deleteDirectory))
 
 	m.Handle("POST /api/videos/upload-ticket", a(s.uploadTicket))
+	m.Handle("POST /api/videos/placeholder", a(s.createPlaceholder))
+	m.Handle("POST /api/videos/{id}/upload-ticket", a(s.videoUploadTicket))
 	m.Handle("POST /api/videos/{id}/complete", a(s.completeVideo))
 	m.Handle("GET /api/videos/{id}", a(s.getVideo))
 	m.Handle("GET /api/videos/{id}/playback", a(s.playback))

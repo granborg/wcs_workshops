@@ -58,11 +58,24 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, u *model.User
 		names[usr.ID] = usr.Name
 	}
 
+	// Every event belongs to this creator, so their own folders and videos name all targets.
+	// Deleting a folder or video deletes its codes and grants, so a missing target is unusual.
+	targets, err := s.auditTargetNames(r, u)
+	if err != nil {
+		return err
+	}
+
 	out := make([]model.AuditEventInfo, len(events))
 	for i, e := range events {
 		info := model.AuditEventInfo{
 			ID: e.Type + ":" + e.SourceID, At: model.ISO(e.At), Type: e.Type, IP: e.IP,
 			DirectoryID: e.DirectoryID, VideoID: e.VideoID, QrCodeID: e.QrCodeID,
+		}
+		switch {
+		case e.VideoID != nil:
+			info.TargetName = nameOr(targets[*e.VideoID], "Deleted video")
+		case e.DirectoryID != nil:
+			info.TargetName = nameOr(targets[*e.DirectoryID], "Deleted folder")
 		}
 		if e.SubjectID != nil {
 			name, ok := names[*e.SubjectID]
@@ -75,4 +88,35 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, u *model.User
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 	return nil
+}
+
+// auditTargetNames maps the creator's folder and video ids to the names the app shows for them.
+func (s *Server) auditTargetNames(r *http.Request, u *model.User) (map[string]string, error) {
+	ctx := r.Context()
+	dirs, err := s.st.ListDirectories(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	videos, err := s.st.ListVideos(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(dirs)+len(videos))
+	for _, d := range dirs {
+		out[d.ID] = d.Name
+		if d.ParentID == nil {
+			out[d.ID] = u.Name
+		}
+	}
+	for _, v := range videos {
+		out[v.ID] = v.Title
+	}
+	return out, nil
+}
+
+func nameOr(name, fallback string) string {
+	if name == "" {
+		return fallback
+	}
+	return name
 }

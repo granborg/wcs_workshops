@@ -4,7 +4,8 @@
 export const USER_ROLES = ['viewer', 'creator'] as const
 export type UserRole = (typeof USER_ROLES)[number]
 
-export const VIDEO_STATUSES = ['uploading', 'processing', 'ready', 'failed'] as const
+/** placeholder: no file yet. The creator uploads it later. */
+export const VIDEO_STATUSES = ['placeholder', 'uploading', 'processing', 'ready', 'failed'] as const
 export type VideoStatus = (typeof VIDEO_STATUSES)[number]
 
 export const AUDIT_TYPES = ['qr.created', 'qr.revoked', 'access.granted', 'access.revoked'] as const
@@ -32,6 +33,7 @@ export interface CreatorSummary {
 
 export interface VideoSummary {
   id: string
+  ownerId: string
   title: string
   directoryId: string
   status: VideoStatus
@@ -93,6 +95,8 @@ export interface AuditEventInfo {
   ip: string | null
   directoryId: string | null
   videoId: string | null
+  /** Folder name or video title, as the app shows it. A root folder shows as the creator's name. */
+  targetName: string
   qrCodeId: string | null
 }
 

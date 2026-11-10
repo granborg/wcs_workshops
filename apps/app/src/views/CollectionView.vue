@@ -69,9 +69,10 @@ function openVideo(v: VideoSummary) {
   void router.push({ name: 'video', params: { videoId: v.id } })
 }
 
-function statusTag(v: VideoSummary): { label: string; severity: 'danger' | 'warn' } | null {
+function statusTag(v: VideoSummary): { label: string; severity: 'danger' | 'warn' | 'info' } | null {
   if (v.status === 'ready') return null
   if (v.status === 'failed') return { label: 'Failed', severity: 'danger' }
+  if (v.status === 'placeholder') return { label: 'Not uploaded yet', severity: 'info' }
   return { label: v.status === 'uploading' ? 'Uploading' : 'Processing', severity: 'warn' }
 }
 

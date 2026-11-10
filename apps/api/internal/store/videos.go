@@ -46,11 +46,16 @@ func (s *Store) CountVideos(ctx context.Context, ownerID string) (int, error) {
 	return n, err
 }
 
+// CreateVideo adds a video row. Without a Vimeo id, the row is a placeholder for a file that comes later.
 func (s *Store) CreateVideo(ctx context.Context, ownerID, directoryID, title string, vimeoID, vimeoHash *string) (*model.Video, error) {
 	t := now()
+	status := model.StatusUploading
+	if vimeoID == nil {
+		status = model.StatusPlaceholder
+	}
 	v := &model.Video{
 		ID: newID(), OwnerID: ownerID, DirectoryID: directoryID, Title: title,
-		VimeoID: vimeoID, VimeoHash: vimeoHash, Status: model.StatusUploading, CreatedAt: t, UpdatedAt: t,
+		VimeoID: vimeoID, VimeoHash: vimeoHash, Status: status, CreatedAt: t, UpdatedAt: t,
 	}
 	err := s.exec(ctx, `INSERT INTO videos (`+videoCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
 		v.ID, v.OwnerID, v.DirectoryID, v.Title, nullStr(v.VimeoID), nullStr(v.VimeoHash), v.Status, toMs(t), toMs(t))
@@ -84,6 +89,16 @@ func (s *Store) UpdateVideoStatus(ctx context.Context, id, status string, durati
 	if err := s.exec(ctx,
 		`UPDATE videos SET status = ?, duration_sec = COALESCE(?, duration_sec), updated_at = ? WHERE id = ?`,
 		status, dur, toMs(now()), id); err != nil {
+		return nil, err
+	}
+	return s.GetVideo(ctx, id)
+}
+
+// AttachUpload points an existing video at a new Vimeo upload and resets its status to uploading.
+func (s *Store) AttachUpload(ctx context.Context, id, vimeoID string, vimeoHash *string) (*model.Video, error) {
+	if err := s.exec(ctx,
+		`UPDATE videos SET vimeo_id = ?, vimeo_hash = ?, status = ?, duration_sec = NULL, updated_at = ? WHERE id = ?`,
+		vimeoID, nullStr(vimeoHash), model.StatusUploading, toMs(now()), id); err != nil {
 		return nil, err
 	}
 	return s.GetVideo(ctx, id)

@@ -51,6 +51,80 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 	return nil
 }
 
+type placeholderRequest struct {
+	Title       string `json:"title"`
+	DirectoryID string `json:"directoryId"`
+}
+
+// createPlaceholder adds a video with no file yet. It shows in the library and can be shared now;
+// the creator uploads the file later through videoUploadTicket.
+func (s *Server) createPlaceholder(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	if err := requireCreator(u); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	var req placeholderRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	title, err := validName(&req.Title, 120)
+	if err != nil {
+		return err
+	}
+	dir, err := s.ownedDirectory(ctx, u, req.DirectoryID)
+	if err != nil {
+		return err
+	}
+	v, err := s.st.CreateVideo(ctx, u.ID, dir.ID, *title, nil, nil)
+	if err != nil {
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusCreated, v.ToSummary())
+	return nil
+}
+
+type videoUploadTicketRequest struct {
+	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// videoUploadTicket starts an upload for an existing video: a placeholder, an upload that did not finish,
+// or a video that failed on Vimeo. Grants and share codes stay on the video, so viewers get the file
+// when it is ready. A previous Vimeo video, if any, is deleted after the new one is reserved.
+func (s *Server) videoUploadTicket(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	if err := requireCreator(u); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	var req videoUploadTicketRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		return err
+	}
+	if req.SizeBytes <= 0 {
+		return httpx.BadRequest("sizeBytes must be positive")
+	}
+	v, err := s.ownedVideo(ctx, u, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	if v.Status == model.StatusProcessing || v.Status == model.StatusReady {
+		return httpx.BadRequest("This video already has a file")
+	}
+	created, err := s.vimeo.CreateTusUpload(ctx, v.Title, req.SizeBytes)
+	if err != nil {
+		return vimeoErr(err)
+	}
+	if _, err := s.st.AttachUpload(ctx, v.ID, created.VimeoID, created.Hash); err != nil {
+		return err
+	}
+	if v.VimeoID != nil {
+		if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil && !errors.Is(err, vimeo.ErrNotConfigured) {
+			s.log.Warn("vimeo delete of replaced upload failed", "video", v.ID, "err", err)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusCreated, model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink})
+	return nil
+}
+
 // refreshStatus asks Vimeo for the transcode state and stores it. Vimeo errors leave the row unchanged.
 func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Video, error) {
 	if v.VimeoID == nil || v.Status == model.StatusReady || v.Status == model.StatusFailed {

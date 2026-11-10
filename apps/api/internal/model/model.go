@@ -10,10 +10,12 @@ const (
 )
 
 const (
-	StatusUploading  = "uploading"
-	StatusProcessing = "processing"
-	StatusReady      = "ready"
-	StatusFailed     = "failed"
+	// StatusPlaceholder is a video with no file yet. The creator uploads the file later.
+	StatusPlaceholder = "placeholder"
+	StatusUploading   = "uploading"
+	StatusProcessing  = "processing"
+	StatusReady       = "ready"
+	StatusFailed      = "failed"
 )
 
 // QRScheme is the custom-scheme payload that early QR codes encoded. Only the installed Android app opens it,
@@ -112,6 +114,7 @@ type CreatorSummary struct {
 
 type VideoSummary struct {
 	ID          string `json:"id"`
+	OwnerID     string `json:"ownerId"`
 	Title       string `json:"title"`
 	DirectoryID string `json:"directoryId"`
 	Status      string `json:"status"`
@@ -175,7 +178,9 @@ type AuditEventInfo struct {
 	IP          *string  `json:"ip"`
 	DirectoryID *string  `json:"directoryId"`
 	VideoID     *string  `json:"videoId"`
-	QrCodeID    *string  `json:"qrCodeId"`
+	// TargetName is the folder name or video title, as the app shows it. A root folder shows as the creator's name.
+	TargetName string  `json:"targetName"`
+	QrCodeID   *string `json:"qrCodeId"`
 }
 
 type UploadTicket struct {
@@ -201,6 +206,7 @@ type RedeemResult struct {
 func (v Video) ToSummary() VideoSummary {
 	return VideoSummary{
 		ID:          v.ID,
+		OwnerID:     v.OwnerID,
 		Title:       v.Title,
 		DirectoryID: v.DirectoryID,
 		Status:      v.Status,
