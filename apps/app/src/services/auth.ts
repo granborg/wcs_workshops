@@ -23,12 +23,13 @@ export interface AuthService {
 const EMULATOR = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST
 
 // Against the emulator any non-empty config works; the demo- project prefix needs no real project.
+// `||`, not `??`: Vite turns an empty line such as `VITE_FIREBASE_API_KEY=` into "", not undefined.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? (EMULATOR ? 'demo-api-key' : undefined),
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? (EMULATOR ? 'demo-wcs.firebaseapp.com' : undefined),
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? (EMULATOR ? 'demo-wcs' : undefined),
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? (EMULATOR ? '1:0:web:demo' : undefined),
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (EMULATOR ? 'demo-api-key' : undefined),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (EMULATOR ? 'demo-wcs.firebaseapp.com' : undefined),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (EMULATOR ? 'demo-wcs' : undefined),
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || (EMULATOR ? '1:0:web:demo' : undefined),
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || undefined,
 }
 
 async function firebaseApp() {
