@@ -99,7 +99,7 @@ function switchMode(next: Mode) {
   <div class="signin">
     <div class="panel">
       <div class="brand">
-        <span class="logo" aria-hidden="true"><i class="pi pi-video" /></span>
+        <img class="logo" src="/favicon-512.png" alt="" width="64" height="64" />
         <h1>WCS Workshops</h1>
         <p class="muted">
           {{ mode === 'create' ? 'Create an account to see the videos shared with you.' : 'Sign in to see the videos shared with you.' }}
@@ -193,18 +193,11 @@ function switchMode(next: Mode) {
 }
 
 .logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
   width: 64px;
   height: 64px;
   border-radius: 18px;
-  background: var(--p-primary-color);
-  color: var(--p-primary-contrast-color);
-}
-
-.logo .pi {
-  font-size: 1.75rem;
+  object-fit: cover;
 }
 
 .panel {
