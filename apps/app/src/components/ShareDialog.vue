@@ -119,8 +119,10 @@ function status(c: QrCodeInfo): { label: string; severity: 'danger' | 'warn' | '
     </template>
 
     <template v-else-if="active && imageUrl">
+      <!-- Print shows only this name and the QR code. -->
+      <h2 class="print-only print-title">{{ name }}</h2>
       <img :src="imageUrl" class="qr-image" alt="QR code" />
-      <p class="hint" style="text-align: center">
+      <p class="hint no-print" style="text-align: center">
         {{ active.redemptions }} scan{{ active.redemptions === 1 ? '' : 's' }}
         <template v-if="active.expiresAt"> · expires {{ formatDateTime(active.expiresAt) }}</template>
       </p>

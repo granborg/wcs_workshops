@@ -426,10 +426,41 @@ a.p-button {
 
 /* ---------- print: only the QR code when the share dialog asks for it ---------- */
 
+.print-only {
+  display: none;
+}
+
 @media print {
+  /* No margin: the browser then has no room for its own header and footer (date, page title, URL). */
+  @page {
+    margin: 0;
+  }
+
+  body.print-qr {
+    padding: 15mm;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* No background logo on paper. */
+  body.print-qr::before {
+    display: none !important;
+  }
+
   /* PrimeVue renders the dialog in a .p-dialog-mask element directly under <body>. */
   body.print-qr > *:not(.p-dialog-mask) {
     display: none !important;
+  }
+
+  body.print-qr .print-only {
+    display: block !important;
+  }
+
+  body.print-qr .print-title {
+    margin: 0 0 8mm;
+    font-size: 24pt;
+    text-align: center;
+    color: #000;
   }
 
   body.print-qr .p-dialog-mask {
@@ -442,10 +473,18 @@ a.p-button {
     max-height: none !important;
     border: none !important;
     box-shadow: none !important;
+    background: #fff !important;
   }
 
-  body.print-qr .p-dialog-header-actions,
+  body.print-qr .p-dialog-header,
   body.print-qr .no-print {
     display: none !important;
+  }
+
+  /* The QR image keeps its own white frame; drop the border so only the code shows. */
+  body.print-qr .qr-image {
+    width: 120mm;
+    max-width: 100%;
+    border: none;
   }
 }
