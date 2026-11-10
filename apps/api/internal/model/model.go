@@ -16,8 +16,12 @@ const (
 	StatusFailed     = "failed"
 )
 
-// QRScheme is the URL scheme encoded in QR images.
+// QRScheme is the custom-scheme payload that early QR codes encoded. Only the installed Android app opens it,
+// so new codes encode an https link (see QrCode.ToInfo). Redeem still accepts it for codes already printed.
 const QRScheme = "wcsw://redeem/"
+
+// RedeemPath is the web route a QR link points to: <public URL>/r/<code>.
+const RedeemPath = "/r/"
 
 // ISO formats a time like JavaScript's Date#toISOString.
 func ISO(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z07:00") }
@@ -210,12 +214,13 @@ func (d Directory) ToRecord() DirectoryRecord {
 	return DirectoryRecord{ID: d.ID, OwnerID: d.OwnerID, ParentID: d.ParentID, Name: d.Name, CreatedAt: ISO(d.CreatedAt)}
 }
 
-// ToInfo converts a QR code row to its JSON shape.
-func (q QrCode) ToInfo() QrCodeInfo {
+// ToInfo converts a QR code row to its JSON shape. baseURL is the public origin of the web app, for
+// example https://wcs-workshops.fly.dev, so any phone camera can open the payload.
+func (q QrCode) ToInfo(baseURL string) QrCodeInfo {
 	return QrCodeInfo{
 		ID:          q.ID,
 		Code:        q.Code,
-		Payload:     QRScheme + q.Code,
+		Payload:     baseURL + RedeemPath + q.Code,
 		DirectoryID: q.DirectoryID,
 		VideoID:     q.VideoID,
 		ExpiresAt:   ISOPtr(q.ExpiresAt),

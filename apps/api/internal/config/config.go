@@ -14,6 +14,7 @@ type Config struct {
 	Addr              string
 	DatabasePath      string
 	CORSOrigins       []string
+	PublicURL         string // origin QR links point to, e.g. https://wcs-workshops.fly.dev; empty = request origin
 	FirebaseProjectID string
 	VimeoAccessToken  string
 	VimeoPrivacy      string // "unlisted" or "disable"
@@ -32,6 +33,7 @@ func Load() (Config, error) {
 		Addr:              get("HOST", "0.0.0.0") + ":" + get("PORT", "3000"),
 		DatabasePath:      get("DATABASE_PATH", "./data/wcs.db"),
 		CORSOrigins:       list("CORS_ORIGINS", "http://localhost:5173,capacitor://localhost,http://localhost"),
+		PublicURL:         strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
 		FirebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
 		VimeoAccessToken:  os.Getenv("VIMEO_ACCESS_TOKEN"),
 		VimeoPrivacy:      get("VIMEO_PRIVACY", "unlisted"),

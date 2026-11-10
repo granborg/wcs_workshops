@@ -54,12 +54,17 @@ A viewer can see a video when an active `access_grants` row exists for:
 Grants reference directory and video ids, not names or paths, so renames keep access and moves change it
 implicitly. Revocation sets `revoked_at` and keeps the row.
 
-A `qr_codes` row holds a random `code`. The QR image encodes `wcsw://redeem/<code>`. Redeeming creates a grant
-with the code id and the client IP. Expired or revoked codes are refused.
+A `qr_codes` row holds a random `code`. The QR image and the "Copy link" button use
+`https://<host>/r/<code>`. `<host>` is `PUBLIC_URL`, or the origin of the request when it is not set. Redeeming
+creates a grant with the code id and the client IP. Expired or revoked codes are refused.
 
-The in-app scanner reads the payload directly. When the phone's camera app scans the code instead, the OS opens
-the app through the `wcsw` scheme. Android registers it in `AndroidManifest.xml`. iOS needs a URL Type entry in
-Xcode. `services/deeplinks.ts` routes the URL to the scan page.
+Any phone camera opens the link in the browser. The `/r/:code` route sends it to the scan page, which redeems the
+code after sign-in. The in-app scanner reads the same link directly. To make the camera open the installed app
+instead of the browser, set up Android App Links and iOS Universal Links for the host; `services/deeplinks.ts`
+already routes `/r/` URLs.
+
+Codes printed before this change encode `wcsw://redeem/<code>`. Redeem still accepts them, and the Android app
+registers the `wcsw` scheme in `AndroidManifest.xml`.
 
 Resolution loads the creator's directories and videos (two queries) and walks the tree in memory. At a few
 hundred videos per creator this is a few milliseconds and keeps the SQL simple.

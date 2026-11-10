@@ -154,7 +154,7 @@ func TestShareRedeemAndPrunedLibrary(t *testing.T) {
 
 	var qr model.QrCodeInfo
 	c.must(creator, "POST", "/share", anyMap{"directoryId": f.season.ID}, &qr)
-	if !strings.HasPrefix(qr.Payload, model.QRScheme) {
+	if !strings.Contains(qr.Payload, "://") || !strings.HasSuffix(qr.Payload, model.RedeemPath+qr.Code) {
 		t.Fatalf("payload = %q", qr.Payload)
 	}
 

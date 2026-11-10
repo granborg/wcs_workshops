@@ -15,6 +15,8 @@ primary_region = "ord"
 
 [env]
   DATABASE_PATH = "/data/wcs.db"
+  # Origin in QR codes and share links. Change it when you add a custom domain.
+  PUBLIC_URL = "https://wcs-workshops.fly.dev"
   FIREBASE_PROJECT_ID = ""
   VIMEO_PRIVACY = "unlisted"
   # Only the Capacitor shells are cross-origin; the web app is served by this binary.

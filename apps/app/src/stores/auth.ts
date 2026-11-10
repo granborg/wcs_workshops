@@ -38,6 +38,20 @@ export const useAuthStore = defineStore('auth', () => {
     await refresh()
   }
 
+  async function signInWithEmail(email: string, password: string) {
+    error.value = null
+    await authService.signInWithEmail(email, password)
+    await refresh()
+  }
+
+  /** Creates a Firebase email/password account. The API creates the user row on the first request. */
+  async function createAccount(email: string, password: string, name?: string) {
+    error.value = null
+    await authService.createAccount(email, password)
+    await refresh()
+    if (name && name !== me.value?.name) await update({ name })
+  }
+
   async function signOut() {
     await authService.signOut()
     me.value = null
@@ -48,5 +62,5 @@ export const useAuthStore = defineStore('auth', () => {
     me.value = await api.me.patch(patch)
   }
 
-  return { me, status, error, isCreator, init, refresh, signIn, signOut, update }
+  return { me, status, error, isCreator, init, refresh, signIn, signInWithEmail, createAccount, signOut, update }
 })

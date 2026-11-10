@@ -42,7 +42,11 @@ async function scan() {
 }
 
 onMounted(() => {
-  if (typeof route.query.code === 'string') void redeem(route.query.code)
+  if (typeof route.query.code === 'string') {
+    void redeem(route.query.code)
+    // Drop the code from the address bar so a reload does not redeem again.
+    void router.replace({ name: 'scan' })
+  }
 })
 
 function openResult() {
@@ -66,7 +70,7 @@ function openResult() {
     <form style="margin-top: 20px; text-align: left" @submit.prevent="redeem(code)">
       <div class="field">
         <label for="code">Or enter a code</label>
-        <input id="code" v-model="code" type="text" autocomplete="off" placeholder="wcsw://redeem/…" />
+        <input id="code" v-model="code" type="text" autocomplete="off" placeholder="https://…/r/…" />
       </div>
       <button type="submit" class="btn block" :disabled="busy || !code.trim()">Add to library</button>
     </form>

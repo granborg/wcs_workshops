@@ -6,7 +6,9 @@
  *
  * Local development uses the Firebase Auth emulator: set VITE_FIREBASE_AUTH_EMULATOR_HOST (for example
  * 127.0.0.1:9099) and no real Firebase project is needed. The emulator offers fake Google, Apple and
- * Microsoft accounts through the same buttons.
+ * Microsoft accounts through the same buttons, and accepts any email and password.
+ *
+ * Email and password accounts need the Email/Password provider turned on in the Firebase console.
  */
 
 import { Capacitor } from '@capacitor/core'
@@ -16,6 +18,9 @@ export type Provider = 'google' | 'apple' | 'microsoft'
 export interface AuthService {
   isSignedIn(): Promise<boolean>
   signIn(provider: Provider): Promise<void>
+  signInWithEmail(email: string, password: string): Promise<void>
+  createAccount(email: string, password: string): Promise<void>
+  sendPasswordReset(email: string): Promise<void>
   signOut(): Promise<void>
   getHeaders(): Promise<Record<string, string>>
 }
@@ -95,6 +100,21 @@ const webAuth: AuthService = {
     // FirebaseUI wraps popup handling, pending-credential linking and error translation.
     await signInWithProvider(ui.get(), await providerFor(provider))
   },
+  async signInWithEmail(email, password) {
+    const { auth } = await webUI()
+    const { signInWithEmailAndPassword } = await import('firebase/auth')
+    await signInWithEmailAndPassword(auth, email, password)
+  },
+  async createAccount(email, password) {
+    const { auth } = await webUI()
+    const { createUserWithEmailAndPassword } = await import('firebase/auth')
+    await createUserWithEmailAndPassword(auth, email, password)
+  },
+  async sendPasswordReset(email) {
+    const { auth } = await webUI()
+    const { sendPasswordResetEmail } = await import('firebase/auth')
+    await sendPasswordResetEmail(auth, email)
+  },
   async signOut() {
     const { auth } = await webUI()
     await auth.signOut()
@@ -133,6 +153,15 @@ const nativeAuth: AuthService = {
     if (provider === 'google') await plugin.signInWithGoogle()
     else if (provider === 'apple') await plugin.signInWithApple()
     else await plugin.signInWithMicrosoft()
+  },
+  async signInWithEmail(email, password) {
+    await (await nativePlugin()).signInWithEmailAndPassword({ email, password })
+  },
+  async createAccount(email, password) {
+    await (await nativePlugin()).createUserWithEmailAndPassword({ email, password })
+  },
+  async sendPasswordReset(email) {
+    await (await nativePlugin()).sendPasswordResetEmail({ email })
   },
   async signOut() {
     await (await nativePlugin()).signOut()

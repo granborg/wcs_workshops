@@ -16,7 +16,8 @@ type redeemRequest struct {
 	Code string `json:"code"`
 }
 
-// extractCode accepts the bare code, the wcsw://redeem/<code> payload, or any URL whose last segment is the code.
+// extractCode accepts the bare code, the https://<host>/r/<code> link, the older wcsw://redeem/<code> payload,
+// or any URL whose last segment is the code.
 func extractCode(raw string) string {
 	if strings.HasPrefix(raw, model.QRScheme) {
 		return strings.TrimPrefix(raw, model.QRScheme)

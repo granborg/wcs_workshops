@@ -76,6 +76,20 @@ async function revoke(id: string) {
   }
 }
 
+const copied = ref(false)
+
+async function copyLink() {
+  if (!active.value) return
+  try {
+    await navigator.clipboard.writeText(active.value.payload)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 2000)
+  } catch {
+    // Clipboard is blocked (no permission or not a secure context): let the user copy it by hand.
+    window.prompt('Copy this link', active.value.payload)
+  }
+}
+
 function print() {
   document.body.classList.add('print-qr')
   const done = () => {
@@ -105,6 +119,7 @@ function status(c: QrCodeInfo): { label: string; cls: string } {
         <template v-if="active.expiresAt"> · expires {{ formatDateTime(active.expiresAt) }}</template>
       </p>
       <div class="btn-row no-print">
+        <button type="button" class="btn" @click="copyLink"><Icon :name="copied ? 'check' : 'link'" /> {{ copied ? 'Copied' : 'Copy link' }}</button>
         <button type="button" class="btn" @click="print"><Icon name="print" /> Print</button>
         <button type="button" class="btn danger" @click="revoke(active.id)">Revoke</button>
       </div>

@@ -98,7 +98,7 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err != nil {
 		return err
 	}
-	httpx.WriteJSON(w, http.StatusCreated, qr.ToInfo())
+	httpx.WriteJSON(w, http.StatusCreated, qr.ToInfo(s.publicURL(r)))
 	return nil
 }
 
@@ -118,9 +118,10 @@ func (s *Server) listShare(w http.ResponseWriter, r *http.Request, u *model.User
 	if err != nil {
 		return err
 	}
+	base := s.publicURL(r)
 	out := make([]model.QrCodeInfo, len(codes))
 	for i, c := range codes {
-		out[i] = c.ToInfo()
+		out[i] = c.ToInfo(base)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 	return nil
@@ -151,6 +152,22 @@ func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request, u *model.Us
 			return err
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, qr.ToInfo())
+	httpx.WriteJSON(w, http.StatusOK, qr.ToInfo(s.publicURL(r)))
 	return nil
+}
+
+// publicURL is the origin that QR links point to. PUBLIC_URL wins when set. Otherwise the origin of this
+// request is used: the Go binary and the Vite dev proxy both serve the web app on the host the caller used.
+func (s *Server) publicURL(r *http.Request) string {
+	if s.cfg.PublicURL != "" {
+		return s.cfg.PublicURL
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if p := r.Header.Get("X-Forwarded-Proto"); p == "http" || p == "https" {
+		scheme = p
+	}
+	return scheme + "://" + r.Host
 }
