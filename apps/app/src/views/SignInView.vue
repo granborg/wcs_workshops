@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Button from 'primevue/button'
+import Divider from 'primevue/divider'
+import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
+import Password from 'primevue/password'
 import { useAuthStore } from '@/stores/auth'
 import { authService, type Provider } from '@/services/auth'
 import { errorMessage } from '@/services/api'
@@ -91,56 +96,128 @@ function switchMode(next: Mode) {
 </script>
 
 <template>
-  <div style="max-width: 360px; margin: 10vh auto 0; text-align: center">
-    <h1 style="font-size: 28px">WCS Workshops</h1>
-    <p class="muted">
-      {{ mode === 'create' ? 'Create an account to see the videos shared with you.' : 'Sign in to see the videos shared with you.' }}
-    </p>
-
-    <form style="margin-top: 24px; text-align: left" @submit.prevent="submitEmail">
-      <div v-if="mode === 'create'" class="field">
-        <label for="signin-name">Name (optional)</label>
-        <input id="signin-name" v-model="name" type="text" autocomplete="name" />
-      </div>
-      <div class="field">
-        <label for="signin-email">Email</label>
-        <input id="signin-email" v-model="email" type="email" autocomplete="email" required />
-      </div>
-      <div class="field">
-        <label for="signin-password">Password</label>
-        <input
-          id="signin-password"
-          v-model="password"
-          type="password"
-          :autocomplete="mode === 'create' ? 'new-password' : 'current-password'"
-          :minlength="mode === 'create' ? 6 : undefined"
-          required
-        />
-      </div>
-      <button type="submit" class="btn primary block" :disabled="busy">
-        {{ mode === 'create' ? 'Create account' : 'Sign in' }}
-      </button>
-    </form>
-
-    <p class="small" style="margin-top: 12px">
-      <template v-if="mode === 'signIn'">
-        <a href="#" @click.prevent="switchMode('create')">Create an account</a>
-        ·
-        <a href="#" @click.prevent="resetPassword">Forgot password?</a>
-      </template>
-      <a v-else href="#" @click.prevent="switchMode('signIn')">I already have an account</a>
-    </p>
-
-    <p class="muted small" style="margin: 20px 0 10px">or</p>
-
-    <div style="display: flex; flex-direction: column; gap: 10px">
-      <button class="btn block" :disabled="busy" @click="go('google')">Continue with Google</button>
-      <button class="btn block" :disabled="busy" @click="go('apple')">Continue with Apple</button>
-      <button class="btn block" :disabled="busy" @click="go('microsoft')">Continue with Microsoft</button>
+  <div class="signin">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i class="pi pi-video" /></span>
+      <h1>WCS Workshops</h1>
+      <p class="muted">
+        {{ mode === 'create' ? 'Create an account to see the videos shared with you.' : 'Sign in to see the videos shared with you.' }}
+      </p>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="notice" class="muted">{{ notice }}</p>
-    <p v-if="auth.error" class="error small">{{ auth.error }}</p>
+    <div class="panel">
+      <form @submit.prevent="submitEmail">
+        <div v-if="mode === 'create'" class="field">
+          <label for="signin-name">Name (optional)</label>
+          <InputText id="signin-name" v-model="name" autocomplete="name" fluid />
+        </div>
+        <div class="field">
+          <label for="signin-email">Email</label>
+          <InputText id="signin-email" v-model="email" type="email" autocomplete="email" required fluid />
+        </div>
+        <div class="field">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <label for="signin-password" style="font-size: 0.875rem; font-weight: 500">Password</label>
+            <Button
+              v-if="mode === 'signIn'"
+              label="Forgot password?"
+              link
+              size="small"
+              style="padding: 0"
+              :disabled="busy"
+              @click="resetPassword"
+            />
+          </div>
+          <Password
+            v-model="password"
+            input-id="signin-password"
+            :feedback="mode === 'create'"
+            toggle-mask
+            fluid
+            :input-props="{
+              autocomplete: mode === 'create' ? 'new-password' : 'current-password',
+              required: true,
+              minlength: mode === 'create' ? 6 : undefined,
+            }"
+          />
+        </div>
+        <Button type="submit" :label="mode === 'create' ? 'Create account' : 'Sign in'" fluid :loading="busy" />
+      </form>
+
+      <p class="switch">
+        <template v-if="mode === 'signIn'">
+          New here? <Button label="Create an account" link style="padding: 0" @click="switchMode('create')" />
+        </template>
+        <template v-else>
+          Have an account? <Button label="Sign in" link style="padding: 0" @click="switchMode('signIn')" />
+        </template>
+      </p>
+
+      <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
+      <Message v-if="notice" severity="success" class="mb">{{ notice }}</Message>
+      <Message v-if="auth.error" severity="error" size="small" class="mb">{{ auth.error }}</Message>
+
+      <Divider align="center"><span class="hint">or continue with</span></Divider>
+
+      <div class="stack">
+        <Button label="Google" icon="pi pi-google" severity="secondary" outlined fluid :disabled="busy" @click="go('google')" />
+        <Button label="Apple" icon="pi pi-apple" severity="secondary" outlined fluid :disabled="busy" @click="go('apple')" />
+        <Button
+          label="Microsoft"
+          icon="pi pi-microsoft"
+          severity="secondary"
+          outlined
+          fluid
+          :disabled="busy"
+          @click="go('microsoft')"
+        />
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.signin {
+  max-width: 400px;
+  margin: 6vh auto 0;
+}
+
+.brand {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.brand h1 {
+  font-size: 1.75rem;
+  margin: 12px 0 6px;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+}
+
+.logo .pi {
+  font-size: 1.75rem;
+}
+
+.panel {
+  padding: 24px 20px;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 16px;
+}
+
+.switch {
+  margin: 14px 0 12px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--p-text-muted-color);
+}
+</style>

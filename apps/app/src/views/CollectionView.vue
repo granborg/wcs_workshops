@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Breadcrumb from 'primevue/breadcrumb'
+import Button from 'primevue/button'
+import Menu from 'primevue/menu'
+import Message from 'primevue/message'
+import Skeleton from 'primevue/skeleton'
+import Tag from 'primevue/tag'
+import type { MenuItem } from 'primevue/menuitem'
+import { useConfirm } from 'primevue/useconfirm'
 import type { DirectoryNode, LibraryTree, VideoSummary } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
+import { useDelayedFlag } from '@/composables/useDelayedFlag'
 import { findNode, pathTo } from '@/utils/tree'
 import { formatDuration } from '@/utils/format'
-import Icon from '@/components/Icon.vue'
-import ActionSheet, { type SheetAction } from '@/components/ActionSheet.vue'
 import TextPromptDialog from '@/components/TextPromptDialog.vue'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoveDialog, { type MoveTarget } from '@/components/MoveDialog.vue'
 import DeleteDirectoryDialog from '@/components/DeleteDirectoryDialog.vue'
 import ShareDialog from '@/components/ShareDialog.vue'
@@ -16,11 +22,14 @@ import AccessDialog from '@/components/AccessDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
+const confirm = useConfirm()
 
 const creatorId = computed(() => String(route.params.creatorId))
 const tree = ref<LibraryTree | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+// Only the first load shows a skeleton; reloads after an edit keep the current list on screen.
+const slow = useDelayedFlag(() => loading.value && !tree.value)
 
 const currentId = computed(() => (typeof route.query.dir === 'string' ? route.query.dir : tree.value?.root.id) ?? null)
 const current = computed<DirectoryNode | null>(() =>
@@ -28,6 +37,14 @@ const current = computed<DirectoryNode | null>(() =>
 )
 const crumbs = computed(() => (tree.value && currentId.value ? pathTo(tree.value.root, currentId.value) : []))
 const canManage = computed(() => tree.value?.canManage ?? false)
+
+const crumbItems = computed<MenuItem[]>(() =>
+  crumbs.value.map((c, i) => ({
+    label: dirName(c),
+    command: i < crumbs.value.length - 1 ? () => openDir(c.id) : undefined,
+    class: i === crumbs.value.length - 1 ? 'crumb-current' : undefined,
+  })),
+)
 
 async function load() {
   loading.value = true
@@ -52,10 +69,14 @@ function openVideo(v: VideoSummary) {
   void router.push({ name: 'video', params: { videoId: v.id } })
 }
 
-function statusBadge(v: VideoSummary): { label: string; cls: string } | null {
+function statusTag(v: VideoSummary): { label: string; severity: 'danger' | 'warn' } | null {
   if (v.status === 'ready') return null
-  if (v.status === 'failed') return { label: 'Failed', cls: 'danger' }
-  return { label: v.status === 'uploading' ? 'Uploading' : 'Processing', cls: 'warn' }
+  if (v.status === 'failed') return { label: 'Failed', severity: 'danger' }
+  return { label: v.status === 'uploading' ? 'Uploading' : 'Processing', severity: 'warn' }
+}
+
+function plural(n: number, word: string) {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
 /* ---------- creator actions ---------- */
@@ -68,28 +89,48 @@ interface Selected {
 }
 
 const selected = ref<Selected | null>(null)
-const sheetOpen = ref(false)
-const dialog = ref<'share' | 'access' | 'rename' | 'move' | 'deleteVideo' | 'deleteDir' | 'newFolder' | null>(null)
+const dialog = ref<'share' | 'access' | 'rename' | 'move' | 'deleteDir' | 'newFolder' | null>(null)
 const busy = ref(false)
+const menu = ref<InstanceType<typeof Menu> | null>(null)
 
-const sheetActions: SheetAction[] = [
-  { key: 'share', label: 'Share (QR code)', icon: 'share' },
-  { key: 'access', label: 'View / edit access', icon: 'users' },
-  { key: 'rename', label: 'Rename', icon: 'edit' },
-  { key: 'move', label: 'Move', icon: 'move' },
-  { key: 'delete', label: 'Delete', icon: 'trash', danger: true },
-]
+const menuItems = computed<MenuItem[]>(() => {
+  const s = selected.value
+  if (!s) return []
+  const items: MenuItem[] = [
+    { label: 'Share (QR code)', icon: 'pi pi-qrcode', command: () => (dialog.value = 'share') },
+    { label: 'View / edit access', icon: 'pi pi-users', command: () => (dialog.value = 'access') },
+  ]
+  // The root folder is the collection itself: it cannot be renamed, moved or deleted.
+  if (s.kind === 'directory' && s.id === tree.value?.root.id) return items
+  items.push(
+    { label: 'Rename', icon: 'pi pi-pencil', command: () => (dialog.value = 'rename') },
+    { label: 'Move', icon: 'pi pi-arrows-alt', command: () => (dialog.value = 'move') },
+    { separator: true },
+    { label: 'Delete', icon: 'pi pi-trash', class: 'menu-danger', command: () => askDelete() },
+  )
+  return items
+})
 
-function openSheet(kind: 'directory' | 'video', id: string, name: string, directoryId: string) {
+function openMenu(event: Event, kind: 'directory' | 'video', id: string, name: string, directoryId: string) {
   selected.value = { kind, id, name, directoryId }
-  sheetOpen.value = true
+  menu.value?.toggle(event)
 }
 
-function pick(key: string) {
-  sheetOpen.value = false
-  if (!selected.value) return
-  if (key === 'delete') dialog.value = selected.value.kind === 'video' ? 'deleteVideo' : 'deleteDir'
-  else dialog.value = key as typeof dialog.value
+function askDelete() {
+  const s = selected.value
+  if (!s) return
+  if (s.kind === 'directory') {
+    dialog.value = 'deleteDir'
+    return
+  }
+  confirm.require({
+    header: 'Delete video',
+    message: `Delete “${s.name}”? It is removed from Vimeo as well. This cannot be undone.`,
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Cancel', severity: 'secondary', text: true },
+    acceptProps: { label: 'Delete', severity: 'danger' },
+    accept: () => void run(() => api.videos.remove(s.id)),
+  })
 }
 
 const shareTarget = computed<ShareTarget | null>(() => {
@@ -133,12 +174,6 @@ function createFolder(name: string) {
   void run(() => api.directories.create(name, parent))
 }
 
-function deleteVideo() {
-  const s = selected.value
-  if (!s) return
-  void run(() => api.videos.remove(s.id))
-}
-
 function afterChange() {
   dialog.value = null
   void load()
@@ -150,39 +185,51 @@ function dirName(node: DirectoryNode) {
 </script>
 
 <template>
-  <p v-if="error" class="error">{{ error }}</p>
-  <p v-if="loading && !tree" class="muted">Loading…</p>
+  <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
+
+  <ul v-if="slow" class="list">
+    <li v-for="i in 4" :key="i" class="row">
+      <Skeleton shape="square" size="40px" border-radius="10px" />
+      <div class="grow"><Skeleton width="55%" class="mb" /><Skeleton width="30%" height="0.75rem" /></div>
+    </li>
+  </ul>
 
   <template v-if="tree && current">
-    <h2 v-if="crumbs.length <= 1" :style="tree.creator.own ? 'font-weight: 700' : ''">{{ tree.creator.name }}</h2>
+    <Breadcrumb v-if="crumbs.length > 1" :model="crumbItems" aria-label="Folder path" />
 
-    <nav v-if="crumbs.length > 1" class="crumbs" aria-label="Folder path">
-      <template v-for="(c, i) in crumbs" :key="c.id">
-        <button v-if="i < crumbs.length - 1" type="button" @click="openDir(c.id)">{{ dirName(c) }}</button>
-        <span v-else class="current">{{ dirName(c) }}</span>
-        <Icon v-if="i < crumbs.length - 1" name="chevron-right" style="width: 14px; height: 14px" />
+    <div class="page-head">
+      <h2>{{ dirName(current) }}</h2>
+      <template v-if="canManage">
+        <Button
+          label="New folder"
+          icon="pi pi-folder-plus"
+          severity="secondary"
+          outlined
+          size="small"
+          @click="dialog = 'newFolder'"
+        />
+        <Button
+          icon="pi pi-ellipsis-v"
+          severity="secondary"
+          text
+          rounded
+          aria-label="Folder options"
+          @click="openMenu($event, 'directory', current.id, dirName(current), current.parentId ?? current.id)"
+        />
       </template>
-    </nav>
-
-    <div v-if="canManage" class="page-head">
-      <span class="muted small">You manage this collection</span>
-      <span style="flex: 1" />
-      <button type="button" class="btn" @click="dialog = 'newFolder'"><Icon name="folder-plus" /> New folder</button>
-      <button
-        type="button"
-        class="iconbtn"
-        aria-label="Folder options"
-        @click="openSheet('directory', current.id, dirName(current), current.parentId ?? current.id)"
-      >
-        <Icon name="more" />
-      </button>
     </div>
+    <p v-if="canManage && crumbs.length <= 1" class="hint">You manage this collection.</p>
 
     <div v-if="current.children.length === 0 && current.videos.length === 0" class="empty">
+      <i class="pi pi-folder-open" aria-hidden="true" />
       <p>This folder is empty.</p>
-      <RouterLink v-if="canManage" class="btn primary" :to="{ name: 'upload', query: { dir: current.id } }">
-        Upload a video
-      </RouterLink>
+      <Button
+        v-if="canManage"
+        as="router-link"
+        :to="{ name: 'upload', query: { dir: current.id } }"
+        label="Upload a video"
+        icon="pi pi-upload"
+      />
     </div>
 
     <ul v-else class="list">
@@ -195,25 +242,21 @@ function dirName(node: DirectoryNode) {
         @click="openDir(d.id)"
         @keydown.enter="openDir(d.id)"
       >
-        <span class="lead"><Icon name="folder" /></span>
+        <span class="lead"><i class="pi pi-folder" aria-hidden="true" /></span>
         <div class="grow">
           <div class="title">{{ d.name }}</div>
-          <div class="sub">
-            {{ d.children.length }} folder{{ d.children.length === 1 ? '' : 's' }} · {{ d.videos.length }} video{{
-              d.videos.length === 1 ? '' : 's'
-            }}
-          </div>
+          <div class="sub">{{ plural(d.children.length, 'folder') }} · {{ plural(d.videos.length, 'video') }}</div>
         </div>
-        <button
+        <Button
           v-if="canManage"
-          type="button"
-          class="iconbtn"
+          icon="pi pi-ellipsis-v"
+          severity="secondary"
+          text
+          rounded
           aria-label="Options"
-          @click.stop="openSheet('directory', d.id, d.name, current.id)"
-        >
-          <Icon name="more" />
-        </button>
-        <span v-else class="lead"><Icon name="chevron-right" /></span>
+          @click.stop="openMenu($event, 'directory', d.id, d.name, current.id)"
+        />
+        <i v-else class="pi pi-chevron-right trail" aria-hidden="true" />
       </li>
 
       <li
@@ -225,34 +268,28 @@ function dirName(node: DirectoryNode) {
         @click="openVideo(v)"
         @keydown.enter="openVideo(v)"
       >
-        <span class="lead"><Icon name="video" /></span>
+        <span class="lead"><i class="pi pi-video" aria-hidden="true" /></span>
         <div class="grow">
           <div class="title">{{ v.title }}</div>
           <div class="sub">
-            <span v-if="statusBadge(v)" class="badge" :class="statusBadge(v)?.cls">{{ statusBadge(v)?.label }}</span>
+            <Tag v-if="statusTag(v)" :value="statusTag(v)?.label" :severity="statusTag(v)?.severity" />
             <template v-else>{{ formatDuration(v.durationSec) }}</template>
           </div>
         </div>
-        <button
+        <Button
           v-if="canManage"
-          type="button"
-          class="iconbtn"
+          icon="pi pi-ellipsis-v"
+          severity="secondary"
+          text
+          rounded
           aria-label="Options"
-          @click.stop="openSheet('video', v.id, v.title, v.directoryId)"
-        >
-          <Icon name="more" />
-        </button>
+          @click.stop="openMenu($event, 'video', v.id, v.title, v.directoryId)"
+        />
       </li>
     </ul>
 
-    <!-- creator dialogs -->
-    <ActionSheet
-      :open="sheetOpen"
-      :title="selected?.name ?? ''"
-      :actions="selected?.kind === 'directory' && selected.id === tree.root.id ? sheetActions.slice(0, 2) : sheetActions"
-      @close="sheetOpen = false"
-      @pick="pick"
-    />
+    <!-- creator menus and dialogs -->
+    <Menu ref="menu" :model="menuItems" popup />
     <ShareDialog :open="dialog === 'share'" :target="shareTarget" :name="selected?.name ?? ''" @close="dialog = null" />
     <AccessDialog :open="dialog === 'access'" :target="shareTarget" :name="selected?.name ?? ''" @close="dialog = null" />
     <TextPromptDialog
@@ -261,6 +298,7 @@ function dirName(node: DirectoryNode) {
       label="New name"
       :initial="selected?.name"
       confirm-label="Rename"
+      :busy="busy"
       @close="dialog = null"
       @submit="rename"
     />
@@ -269,6 +307,7 @@ function dirName(node: DirectoryNode) {
       title="New folder"
       label="Folder name"
       confirm-label="Create"
+      :busy="busy"
       @close="dialog = null"
       @submit="createFolder"
     />
@@ -280,16 +319,6 @@ function dirName(node: DirectoryNode) {
       @close="dialog = null"
       @moved="afterChange"
     />
-    <ConfirmDialog
-      :open="dialog === 'deleteVideo'"
-      title="Delete video"
-      :message="`Delete “${selected?.name ?? ''}”? It is removed from Vimeo as well. This cannot be undone.`"
-      confirm-label="Delete"
-      danger
-      :busy="busy"
-      @close="dialog = null"
-      @confirm="deleteVideo"
-    />
     <DeleteDirectoryDialog
       :open="dialog === 'deleteDir'"
       :node="selectedNode"
@@ -300,3 +329,18 @@ function dirName(node: DirectoryNode) {
     />
   </template>
 </template>
+
+<style scoped>
+:deep(.p-breadcrumb-list) {
+  flex-wrap: wrap;
+}
+
+:deep(.p-breadcrumb-item-label) {
+  white-space: nowrap;
+}
+
+:deep(.crumb-current .p-breadcrumb-item-label) {
+  color: var(--p-text-color);
+  font-weight: 500;
+}
+</style>

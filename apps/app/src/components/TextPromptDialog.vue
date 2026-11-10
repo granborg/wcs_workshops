@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
 import BaseDialog from './BaseDialog.vue'
 
 const props = defineProps<{
@@ -8,6 +11,7 @@ const props = defineProps<{
   label: string
   initial?: string
   confirmLabel?: string
+  busy?: boolean
 }>()
 const emit = defineEmits<{ close: []; submit: [value: string] }>()
 
@@ -39,12 +43,12 @@ function submit() {
     <form @submit.prevent="submit">
       <div class="field">
         <label for="prompt-input">{{ label }}</label>
-        <input id="prompt-input" v-model="value" type="text" autocomplete="off" autofocus />
+        <InputText id="prompt-input" v-model="value" autocomplete="off" autofocus fluid :invalid="!!error" />
       </div>
-      <p v-if="error" class="error">{{ error }}</p>
+      <Message v-if="error" severity="error" size="small" variant="simple">{{ error }}</Message>
       <div class="btn-row">
-        <button type="button" class="btn" @click="emit('close')">Cancel</button>
-        <button type="submit" class="btn primary">{{ confirmLabel ?? 'Save' }}</button>
+        <Button label="Cancel" severity="secondary" text @click="emit('close')" />
+        <Button type="submit" :label="confirmLabel ?? 'Save'" :loading="busy" />
       </div>
     </form>
   </BaseDialog>

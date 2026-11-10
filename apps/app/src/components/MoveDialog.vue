@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import Button from 'primevue/button'
+import Message from 'primevue/message'
 import type { DirectoryNode } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { findNode, flatten, subtreeIds } from '@/utils/tree'
 import BaseDialog from './BaseDialog.vue'
+import FolderSelect from './FolderSelect.vue'
 
 export interface MoveTarget {
   kind: 'directory' | 'video'
@@ -28,7 +31,8 @@ const options = computed(() => {
     if (node) for (const id of subtreeIds(node)) excluded.add(id)
   }
   return flatten(props.root).map((d) => ({
-    ...d,
+    id: d.id,
+    depth: d.depth,
     label: d.depth === 0 ? props.creatorName : d.name,
     disabled: excluded.has(d.id),
   }))
@@ -62,22 +66,18 @@ async function confirm() {
 
 <template>
   <BaseDialog :open="open" :title="`Move ${target?.name ?? ''}`" @close="emit('close')">
-    <p class="muted small">
-      Moving changes who can see this item. Access granted on the item itself follows it. Access inherited from
-      the old folder stops. Access inherited from the new folder starts.
-    </p>
+    <Message severity="info" size="small" class="mb">
+      Moving changes who can see this item. Access granted on the item itself follows it. Access inherited from the
+      old folder stops. Access inherited from the new folder starts.
+    </Message>
     <div class="field">
       <label for="move-select">Destination folder</label>
-      <select id="move-select" v-model="choice">
-        <option v-for="o in options" :key="o.id" :value="o.id" :disabled="o.disabled">
-          {{ '  '.repeat(o.depth) }}{{ o.label }}
-        </option>
-      </select>
+      <FolderSelect v-model="choice" :options="options" input-id="move-select" />
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
+    <Message v-if="error" severity="error">{{ error }}</Message>
     <div class="btn-row">
-      <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button type="button" class="btn primary" :disabled="busy || !choice" @click="confirm">Move</button>
+      <Button label="Cancel" severity="secondary" text :disabled="busy" @click="emit('close')" />
+      <Button label="Move" icon="pi pi-arrows-alt" :loading="busy" :disabled="!choice" @click="confirm" />
     </div>
   </BaseDialog>
 </template>

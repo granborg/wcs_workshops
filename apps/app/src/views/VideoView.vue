@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Button from 'primevue/button'
+import Message from 'primevue/message'
+import Skeleton from 'primevue/skeleton'
 import type { PlaybackInfo, VideoSummary } from '@/types'
 import { api, errorMessage } from '@/services/api'
-import Icon from '@/components/Icon.vue'
+import { useDelayedFlag } from '@/composables/useDelayedFlag'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +15,8 @@ const videoId = String(route.params.videoId)
 const video = ref<VideoSummary | null>(null)
 const playback = ref<PlaybackInfo | null>(null)
 const error = ref<string | null>(null)
+const loading = ref(true)
+const slow = useDelayedFlag(loading)
 let poll: ReturnType<typeof setTimeout> | null = null
 
 async function load() {
@@ -26,6 +31,8 @@ async function load() {
     }
   } catch (err) {
     error.value = errorMessage(err)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -37,11 +44,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-head">
-    <button type="button" class="iconbtn" aria-label="Back" @click="router.back()"><Icon name="back" /></button>
+    <Button icon="pi pi-arrow-left" severity="secondary" text rounded aria-label="Back" @click="router.back()" />
     <h2>{{ video?.title ?? '' }}</h2>
   </div>
 
-  <p v-if="error" class="error">{{ error }}</p>
+  <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
   <div v-if="playback" class="player">
     <iframe
@@ -51,9 +58,12 @@ onBeforeUnmount(() => {
       allowfullscreen
     />
   </div>
+  <Skeleton v-else-if="slow" width="100%" style="aspect-ratio: 16 / 9; height: auto" border-radius="10px" />
 
-  <p v-if="video && video.status !== 'ready'" class="muted" style="margin-top: 12px">
-    <template v-if="video.status === 'failed'">This video failed to process on Vimeo.</template>
-    <template v-else>Vimeo is still processing this video. Playback starts when it is ready.</template>
-  </p>
+  <Message v-if="video?.status === 'failed'" severity="error" style="margin-top: 12px">
+    This video failed to process on Vimeo.
+  </Message>
+  <Message v-else-if="video && video.status !== 'ready'" severity="info" icon="pi pi-clock" style="margin-top: 12px">
+    Vimeo is still processing this video. Playback starts when it is ready.
+  </Message>
 </template>

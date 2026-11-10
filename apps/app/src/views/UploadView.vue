@@ -2,18 +2,23 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Upload } from 'tus-js-client'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
+import ProgressBar from 'primevue/progressbar'
 import type { LibraryTree } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { flatten } from '@/utils/tree'
 import { formatBytes } from '@/utils/format'
-import Icon from '@/components/Icon.vue'
+import FolderSelect from '@/components/FolderSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
 const tree = ref<LibraryTree | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 const file = ref<File | null>(null)
 const title = ref('')
 const directoryId = ref(typeof route.query.dir === 'string' ? route.query.dir : '')
@@ -22,7 +27,9 @@ const phase = ref<'idle' | 'reserving' | 'uploading' | 'finishing' | 'done'>('id
 const error = ref<string | null>(null)
 
 const folders = computed(() =>
-  tree.value ? flatten(tree.value.root).map((d) => ({ ...d, label: d.depth === 0 ? tree.value!.creator.name : d.name })) : [],
+  tree.value
+    ? flatten(tree.value.root).map((d) => ({ id: d.id, depth: d.depth, label: d.depth === 0 ? tree.value!.creator.name : d.name }))
+    : [],
 )
 const busy = computed(() => phase.value !== 'idle' && phase.value !== 'done')
 
@@ -76,41 +83,98 @@ async function start() {
 </script>
 
 <template>
-  <form style="max-width: 480px; margin: 0 auto" @submit.prevent="start">
+  <form class="narrow" @submit.prevent="start">
     <div class="field">
       <label for="file">Video file</label>
-      <input id="file" type="file" accept="video/*" :disabled="busy" @change="onFile" />
-      <span v-if="file" class="muted small">{{ file.name }} · {{ formatBytes(file.size) }}</span>
+      <input id="file" ref="fileInput" type="file" accept="video/*" hidden :disabled="busy" @change="onFile" />
+      <button type="button" class="picker" :disabled="busy" @click="fileInput?.click()">
+        <i class="pi" :class="file ? 'pi-video' : 'pi-cloud-upload'" aria-hidden="true" />
+        <span v-if="file" class="picker-text">
+          <strong>{{ file.name }}</strong>
+          <span class="hint">{{ formatBytes(file.size) }} · tap to choose another file</span>
+        </span>
+        <span v-else class="picker-text">
+          <strong>Choose a video</strong>
+          <span class="hint">From this device's files or camera roll</span>
+        </span>
+      </button>
     </div>
 
     <div class="field">
       <label for="title">Title</label>
-      <input id="title" v-model="title" type="text" :disabled="busy" maxlength="120" />
+      <InputText id="title" v-model="title" :disabled="busy" maxlength="120" fluid />
     </div>
 
     <div class="field">
       <label for="dir">Destination folder</label>
-      <select id="dir" v-model="directoryId" :disabled="busy || folders.length === 0">
-        <option v-for="d in folders" :key="d.id" :value="d.id">{{ '  '.repeat(d.depth) }}{{ d.label }}</option>
-      </select>
+      <FolderSelect v-model="directoryId" :options="folders" input-id="dir" :disabled="busy || folders.length === 0" />
     </div>
 
-    <div v-if="busy" style="margin: 16px 0">
-      <div class="progress"><div :style="{ width: progress + '%' }" /></div>
-      <p class="muted small" style="margin-top: 6px">
+    <div v-if="busy" class="field">
+      <ProgressBar :value="progress" :mode="phase === 'uploading' ? 'determinate' : 'indeterminate'" style="height: 10px" />
+      <span class="hint">
         <template v-if="phase === 'reserving'">Preparing upload…</template>
         <template v-else-if="phase === 'uploading'">Uploading {{ progress }}%</template>
         <template v-else>Finishing…</template>
-      </p>
+      </span>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
-    <button type="submit" class="btn primary block" :disabled="busy || !file || !title.trim() || !directoryId">
-      <Icon name="upload" /> Upload
-    </button>
-    <p class="muted small" style="margin-top: 12px">
+    <Button
+      type="submit"
+      label="Upload"
+      icon="pi pi-upload"
+      fluid
+      :loading="busy"
+      :disabled="!file || !title.trim() || !directoryId"
+    />
+    <p class="hint" style="margin-top: 12px">
       The file goes directly from this device to Vimeo. Keep the app open until the upload finishes.
     </p>
   </form>
 </template>
+
+<style scoped>
+.picker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 18px 16px;
+  border: 1.5px dashed var(--p-content-border-color);
+  border-radius: var(--radius);
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.picker:hover:not(:disabled) {
+  border-color: var(--p-primary-color);
+}
+
+.picker:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.picker .pi {
+  font-size: 1.75rem;
+  color: var(--p-primary-color);
+}
+
+.picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.picker-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

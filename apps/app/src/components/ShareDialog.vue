@@ -1,21 +1,29 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import QRCode from 'qrcode'
+import Button from 'primevue/button'
+import DatePicker from 'primevue/datepicker'
+import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
+import Tag from 'primevue/tag'
+import { useToast } from 'primevue/usetoast'
 import type { QrCodeInfo } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { formatDateTime } from '@/utils/format'
+import { useDelayedFlag } from '@/composables/useDelayedFlag'
 import BaseDialog from './BaseDialog.vue'
-import Icon from './Icon.vue'
 
 const props = defineProps<{ open: boolean; target: ShareTarget | null; name: string }>()
 const emit = defineEmits<{ close: [] }>()
+const toast = useToast()
 
 const codes = ref<QrCodeInfo[]>([])
 const loading = ref(false)
+const slow = useDelayedFlag(loading)
 const error = ref<string | null>(null)
 const imageUrl = ref<string | null>(null)
 const showNewForm = ref(false)
-const expiresAt = ref('')
+const expiresAt = ref<Date | null>(null)
 const creating = ref(false)
 
 const active = computed(() => codes.value.find((c) => !c.revokedAt && (!c.expiresAt || new Date(c.expiresAt) > new Date())) ?? null)
@@ -39,7 +47,7 @@ watch(
   (open) => {
     if (open) {
       showNewForm.value = false
-      expiresAt.value = ''
+      expiresAt.value = null
       void load()
     }
   },
@@ -54,11 +62,10 @@ async function create() {
   creating.value = true
   error.value = null
   try {
-    const iso = expiresAt.value ? new Date(expiresAt.value).toISOString() : undefined
-    const created = await api.share.create(props.target, iso)
+    const created = await api.share.create(props.target, expiresAt.value?.toISOString())
     codes.value = [created, ...codes.value]
     showNewForm.value = false
-    expiresAt.value = ''
+    expiresAt.value = null
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
@@ -76,14 +83,11 @@ async function revoke(id: string) {
   }
 }
 
-const copied = ref(false)
-
 async function copyLink() {
   if (!active.value) return
   try {
     await navigator.clipboard.writeText(active.value.payload)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 2000)
+    toast.add({ severity: 'success', summary: 'Link copied', life: 2000 })
   } catch {
     // Clipboard is blocked (no permission or not a secure context): let the user copy it by hand.
     window.prompt('Copy this link', active.value.payload)
@@ -100,60 +104,86 @@ function print() {
   window.print()
 }
 
-function status(c: QrCodeInfo): { label: string; cls: string } {
-  if (c.revokedAt) return { label: 'Revoked', cls: 'danger' }
-  if (c.expiresAt && new Date(c.expiresAt) <= new Date()) return { label: 'Expired', cls: 'warn' }
-  return { label: 'Active', cls: '' }
+function status(c: QrCodeInfo): { label: string; severity: 'danger' | 'warn' | 'success' } {
+  if (c.revokedAt) return { label: 'Revoked', severity: 'danger' }
+  if (c.expiresAt && new Date(c.expiresAt) <= new Date()) return { label: 'Expired', severity: 'warn' }
+  return { label: 'Active', severity: 'success' }
 }
 </script>
 
 <template>
   <BaseDialog :open="open" :title="`Share ${name}`" @close="emit('close')">
-    <p v-if="loading" class="muted">Loading…</p>
-    <p v-if="error" class="error">{{ error }}</p>
+    <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
+    <template v-if="loading">
+      <div v-if="slow" class="empty"><ProgressSpinner style="width: 32px; height: 32px" /></div>
+    </template>
 
-    <template v-if="active && imageUrl">
+    <template v-else-if="active && imageUrl">
       <img :src="imageUrl" class="qr-image" alt="QR code" />
-      <p class="muted small" style="text-align: center">
+      <p class="hint" style="text-align: center">
         {{ active.redemptions }} scan{{ active.redemptions === 1 ? '' : 's' }}
         <template v-if="active.expiresAt"> · expires {{ formatDateTime(active.expiresAt) }}</template>
       </p>
-      <div class="btn-row no-print">
-        <button type="button" class="btn" @click="copyLink"><Icon :name="copied ? 'check' : 'link'" /> {{ copied ? 'Copied' : 'Copy link' }}</button>
-        <button type="button" class="btn" @click="print"><Icon name="print" /> Print</button>
-        <button type="button" class="btn danger" @click="revoke(active.id)">Revoke</button>
+      <div class="actions no-print">
+        <Button label="Copy link" icon="pi pi-link" severity="secondary" outlined @click="copyLink" />
+        <Button label="Print" icon="pi pi-print" severity="secondary" outlined @click="print" />
+        <Button label="Revoke" icon="pi pi-ban" severity="danger" text @click="revoke(active.id)" />
       </div>
     </template>
-    <p v-else-if="!loading" class="muted no-print">No active QR code. Generate one to share this item.</p>
 
-    <div class="no-print">
-      <button v-if="!showNewForm" type="button" class="btn primary block" style="margin-top: 12px" @click="showNewForm = true">
-        <Icon name="qr" /> Generate new code
-      </button>
-      <form v-else style="margin-top: 12px" @submit.prevent="create">
+    <div v-else class="empty no-print">
+      <i class="pi pi-qrcode" aria-hidden="true" />
+      <p>No active QR code. Generate one to share this item.</p>
+    </div>
+
+    <div class="no-print" style="margin-top: 16px">
+      <Button v-if="!showNewForm" label="Generate new code" icon="pi pi-plus" fluid @click="showNewForm = true" />
+      <form v-else @submit.prevent="create">
         <div class="field">
           <label for="share-expiry">Expires (optional)</label>
-          <input id="share-expiry" v-model="expiresAt" type="datetime-local" />
+          <DatePicker
+            v-model="expiresAt"
+            input-id="share-expiry"
+            show-time
+            hour-format="12"
+            :min-date="new Date()"
+            show-icon
+            show-button-bar
+            placeholder="Never"
+            fluid
+          />
         </div>
         <div class="btn-row">
-          <button type="button" class="btn" :disabled="creating" @click="showNewForm = false">Cancel</button>
-          <button type="submit" class="btn primary" :disabled="creating">Generate</button>
+          <Button label="Cancel" severity="secondary" text :disabled="creating" @click="showNewForm = false" />
+          <Button type="submit" label="Generate" icon="pi pi-qrcode" :loading="creating" />
         </div>
       </form>
 
       <template v-if="others.length">
-        <h3 class="small muted" style="margin-top: 16px">Earlier codes</h3>
+        <h3 class="hint" style="margin: 20px 0 8px; font-weight: 600">Earlier codes</h3>
         <ul class="list">
           <li v-for="c in others" :key="c.id" class="row">
             <div class="grow">
               <div class="title small">{{ formatDateTime(c.createdAt) }}</div>
               <div class="sub">{{ c.redemptions }} scan{{ c.redemptions === 1 ? '' : 's' }}</div>
             </div>
-            <span class="badge" :class="status(c).cls">{{ status(c).label }}</span>
-            <button v-if="!c.revokedAt" type="button" class="btn ghost" @click="revoke(c.id)">Revoke</button>
+            <Tag :value="status(c).label" :severity="status(c).severity" />
+            <Button v-if="!c.revokedAt" label="Revoke" severity="danger" text size="small" @click="revoke(c.id)" />
           </li>
         </ul>
       </template>
     </div>
   </BaseDialog>
 </template>
+
+<style scoped>
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.actions > :last-child {
+  grid-column: 1 / -1;
+}
+</style>

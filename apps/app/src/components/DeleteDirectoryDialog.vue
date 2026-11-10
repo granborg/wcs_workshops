@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import Button from 'primevue/button'
+import Message from 'primevue/message'
+import RadioButton from 'primevue/radiobutton'
 import type { DirectoryNode } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { countVideos, flatten, subtreeIds } from '@/utils/tree'
 import BaseDialog from './BaseDialog.vue'
+import FolderSelect from './FolderSelect.vue'
 
 const props = defineProps<{ open: boolean; node: DirectoryNode | null; root: DirectoryNode; creatorName: string }>()
 const emit = defineEmits<{ close: []; deleted: [] }>()
@@ -20,7 +24,7 @@ const options = computed(() => {
   const excluded = new Set(subtreeIds(props.node))
   return flatten(props.root)
     .filter((d) => !excluded.has(d.id))
-    .map((d) => ({ ...d, label: d.depth === 0 ? props.creatorName : d.name }))
+    .map((d) => ({ id: d.id, depth: d.depth, label: d.depth === 0 ? props.creatorName : d.name }))
 })
 
 watch(
@@ -55,48 +59,57 @@ async function confirm() {
 
 <template>
   <BaseDialog :open="open" :title="`Delete ${node?.name ?? 'folder'}`" @close="emit('close')">
-    <template v-if="videoCount === 0">
-      <p>This folder and its sub-folders hold no videos. Anyone with access to this folder loses it.</p>
-    </template>
+    <p v-if="videoCount === 0">This folder and its sub-folders hold no videos. Anyone with access to this folder loses it.</p>
     <template v-else>
       <p>
         This folder and its sub-folders hold {{ videoCount }} video{{ videoCount === 1 ? '' : 's' }}. What should happen
         to them?
       </p>
-      <label class="radio">
-        <input v-model="mode" type="radio" value="move" />
-        <span>
-          <strong>Move them to another folder</strong>
-          <span class="muted small"><br />Access granted on individual videos stays in place.</span>
-        </span>
-      </label>
-      <div v-if="mode === 'move'" class="field">
-        <label for="delete-target">Destination folder</label>
-        <select id="delete-target" v-model="target">
-          <option v-for="o in options" :key="o.id" :value="o.id">
-            {{ '  '.repeat(o.depth) }}{{ o.label }}
-          </option>
-        </select>
+      <div class="stack">
+        <label class="choice" for="del-move">
+          <RadioButton v-model="mode" input-id="del-move" name="del-mode" value="move" />
+          <span>
+            <strong>Move them to another folder</strong>
+            <span class="hint" style="display: block">Access granted on individual videos stays in place.</span>
+          </span>
+        </label>
+        <div v-if="mode === 'move'" class="field" style="margin-left: 32px">
+          <label for="delete-target">Destination folder</label>
+          <FolderSelect v-model="target" :options="options" input-id="delete-target" />
+        </div>
+        <label class="choice" for="del-delete">
+          <RadioButton v-model="mode" input-id="del-delete" name="del-mode" value="delete" />
+          <span>
+            <strong style="color: var(--p-red-500)">Delete all {{ videoCount }} videos</strong>
+            <span class="hint" style="display: block">Removed from Vimeo as well. This cannot be undone.</span>
+          </span>
+        </label>
       </div>
-      <label class="radio">
-        <input v-model="mode" type="radio" value="delete" />
-        <span>
-          <strong style="color: var(--danger)">Delete all {{ videoCount }} videos</strong>
-          <span class="muted small"><br />Removed from Vimeo as well. This cannot be undone.</span>
-        </span>
-      </label>
     </template>
-    <p v-if="error" class="error">{{ error }}</p>
+    <Message v-if="error" severity="error" style="margin-top: 12px">{{ error }}</Message>
     <div class="btn-row">
-      <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button
-        type="button"
-        class="btn danger"
-        :disabled="busy || (videoCount > 0 && mode === 'move' && !target)"
+      <Button label="Cancel" severity="secondary" text :disabled="busy" @click="emit('close')" />
+      <Button
+        label="Delete folder"
+        icon="pi pi-trash"
+        severity="danger"
+        :loading="busy"
+        :disabled="videoCount > 0 && mode === 'move' && !target"
         @click="confirm"
-      >
-        Delete folder
-      </button>
+      />
     </div>
   </BaseDialog>
 </template>
+
+<style scoped>
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.choice :deep(.p-radiobutton) {
+  margin-top: 2px;
+}
+</style>

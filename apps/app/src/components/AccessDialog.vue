@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import Button from 'primevue/button'
+import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
 import type { AccessGrantInfo } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { formatDateTime } from '@/utils/format'
+import { useDelayedFlag } from '@/composables/useDelayedFlag'
 import BaseDialog from './BaseDialog.vue'
 
 const props = defineProps<{ open: boolean; target: ShareTarget | null; name: string }>()
@@ -10,6 +14,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const grants = ref<AccessGrantInfo[]>([])
 const loading = ref(false)
+const slow = useDelayedFlag(loading)
 const error = ref<string | null>(null)
 
 async function load() {
@@ -45,19 +50,23 @@ async function revoke(id: string) {
 
 <template>
   <BaseDialog :open="open" :title="`Access to ${name}`" @close="emit('close')">
-    <p class="muted small">
-      People granted access on this item. Access inherited from a parent folder is listed on that folder.
-    </p>
-    <p v-if="loading" class="muted">Loading…</p>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-else-if="!loading && grants.length === 0" class="empty">No one has direct access.</p>
+    <p class="hint">People granted access on this item. Access inherited from a parent folder is listed on that folder.</p>
+    <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
+    <template v-if="loading">
+      <div v-if="slow" class="empty"><ProgressSpinner style="width: 32px; height: 32px" /></div>
+    </template>
+    <div v-else-if="grants.length === 0" class="empty">
+      <i class="pi pi-users" aria-hidden="true" />
+      <p>No one has direct access.</p>
+    </div>
     <ul v-else class="list">
       <li v-for="g in grants" :key="g.id" class="row">
+        <span class="lead"><i class="pi pi-user" aria-hidden="true" /></span>
         <div class="grow">
           <div class="title">{{ g.user.name }}</div>
           <div class="sub">Since {{ formatDateTime(g.createdAt) }}</div>
         </div>
-        <button type="button" class="btn danger" @click="revoke(g.id)">Revoke</button>
+        <Button label="Revoke" severity="danger" text size="small" @click="revoke(g.id)" />
       </li>
     </ul>
   </BaseDialog>

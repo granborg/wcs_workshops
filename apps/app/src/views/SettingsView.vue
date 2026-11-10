@@ -1,21 +1,37 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
+import SelectButton from 'primevue/selectbutton'
+import { useConfirm } from 'primevue/useconfirm'
+import { useToast } from 'primevue/usetoast'
 import type { UserRole } from '@/types'
 import { errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import Icon from '@/components/Icon.vue'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { colorMode, type ColorMode } from '@/services/colorMode'
 
 const auth = useAuthStore()
 const router = useRouter()
+const confirm = useConfirm()
+const toast = useToast()
 
 const name = ref(auth.me?.name ?? '')
 const role = ref<UserRole>(auth.me?.role ?? 'viewer')
 const busy = ref(false)
 const error = ref<string | null>(null)
-const saved = ref(false)
-const confirmViewer = ref(false)
+
+const roles: { label: string; value: UserRole }[] = [
+  { label: 'Viewer', value: 'viewer' },
+  { label: 'Creator', value: 'creator' },
+]
+
+const colorModes: { label: string; value: ColorMode; icon: string }[] = [
+  { label: 'Light', value: 'light', icon: 'pi pi-sun' },
+  { label: 'Dark', value: 'dark', icon: 'pi pi-moon' },
+  { label: 'System', value: 'system', icon: 'pi pi-desktop' },
+]
 
 watch(
   () => auth.me,
@@ -27,15 +43,16 @@ watch(
   },
 )
 
-async function run(action: () => Promise<unknown>) {
+async function run(action: () => Promise<unknown>): Promise<boolean> {
   busy.value = true
   error.value = null
-  saved.value = false
   try {
     await action()
-    saved.value = true
+    toast.add({ severity: 'success', summary: 'Saved', life: 1500 })
+    return true
   } catch (err) {
     error.value = errorMessage(err)
+    return false
   } finally {
     busy.value = false
   }
@@ -47,25 +64,29 @@ function saveName() {
   void run(() => auth.update({ name: n }))
 }
 
-function onRoleChange() {
-  if (role.value === auth.me?.role) return
-  if (role.value === 'viewer') {
-    confirmViewer.value = true
+function onRoleChange(next: UserRole | null) {
+  // SelectButton emits null when the active option is clicked again; keep the current role.
+  if (!next || next === auth.me?.role) {
+    role.value = auth.me?.role ?? 'viewer'
     return
   }
-  void run(() => auth.update({ role: 'creator' }))
-}
-
-function becomeViewer() {
-  confirmViewer.value = false
-  void run(() => auth.update({ role: 'viewer' })).then(() => {
-    if (error.value) role.value = 'creator'
+  if (next === 'creator') {
+    void run(() => auth.update({ role: 'creator' }))
+    return
+  }
+  confirm.require({
+    header: 'Switch to viewer',
+    message:
+      'A viewer account cannot hold videos. Your collection must be empty first. Any folders and QR codes are removed. Continue?',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Cancel', severity: 'secondary', text: true },
+    acceptProps: { label: 'Switch to viewer', severity: 'danger' },
+    accept: async () => {
+      if (!(await run(() => auth.update({ role: 'viewer' })))) role.value = 'creator'
+    },
+    reject: () => (role.value = 'creator'),
+    onHide: () => (role.value = auth.me?.role ?? role.value),
   })
-}
-
-function cancelViewer() {
-  confirmViewer.value = false
-  role.value = 'creator'
 }
 
 async function signOut() {
@@ -75,47 +96,96 @@ async function signOut() {
 </script>
 
 <template>
-  <section v-if="auth.me" style="max-width: 480px; margin: 0 auto">
-    <h2>Account</h2>
-    <p class="muted small">Signed in as {{ auth.me.email ?? 'unknown' }}</p>
+  <section v-if="auth.me" class="narrow">
+    <div class="profile">
+      <span class="avatar" aria-hidden="true">{{ (auth.me.name || '?').slice(0, 1).toUpperCase() }}</span>
+      <div style="min-width: 0">
+        <h2 style="margin: 0">{{ auth.me.name }}</h2>
+        <p class="hint" style="margin: 0">{{ auth.me.email ?? 'No email on this account' }}</p>
+      </div>
+    </div>
 
     <div class="field">
       <label for="name">Name</label>
-      <input id="name" v-model="name" type="text" maxlength="80" :disabled="busy" @blur="saveName" @keydown.enter.prevent="saveName" />
-      <span class="muted small">Viewers see this name in their library. Creators see it when auditing access.</span>
+      <InputText id="name" v-model="name" maxlength="80" :disabled="busy" fluid @blur="saveName" @keydown.enter.prevent="saveName" />
+      <span class="hint">Viewers see this name in their library. Creators see it when auditing access.</span>
     </div>
 
     <div class="field">
-      <label for="role">Account type</label>
-      <select id="role" v-model="role" :disabled="busy" @change="onRoleChange">
-        <option value="viewer">Viewer</option>
-        <option value="creator">Creator</option>
-      </select>
-      <span class="muted small">Creators can upload, organize, and share videos.</span>
+      <label id="role-label">Account type</label>
+      <SelectButton
+        v-model="role"
+        :options="roles"
+        option-label="label"
+        option-value="value"
+        :allow-empty="false"
+        :disabled="busy"
+        aria-labelledby="role-label"
+        @update:model-value="onRoleChange"
+      />
+      <span class="hint">Creators can upload, organize, and share videos.</span>
+    </div>
+
+    <div class="field">
+      <label id="appearance-label">Appearance</label>
+      <SelectButton
+        v-model="colorMode"
+        :options="colorModes"
+        option-label="label"
+        option-value="value"
+        :allow-empty="false"
+        aria-labelledby="appearance-label"
+      >
+        <template #option="{ option }">
+          <i :class="option.icon" aria-hidden="true" />
+          <span>{{ option.label }}</span>
+        </template>
+      </SelectButton>
+      <span class="hint">System follows this device's light or dark setting.</span>
     </div>
 
     <ul v-if="auth.isCreator" class="list">
-      <li class="row clickable" role="button" tabindex="0" @click="router.push({ name: 'audit' })" @keydown.enter="router.push({ name: 'audit' })">
-        <span class="lead"><Icon name="list" /></span>
-        <div class="grow"><div class="title">Audit log</div><div class="sub">Who gained or lost access, and when</div></div>
-        <span class="lead"><Icon name="chevron-right" /></span>
+      <li
+        class="row clickable"
+        role="button"
+        tabindex="0"
+        @click="router.push({ name: 'audit' })"
+        @keydown.enter="router.push({ name: 'audit' })"
+      >
+        <span class="lead"><i class="pi pi-history" aria-hidden="true" /></span>
+        <div class="grow">
+          <div class="title">Audit log</div>
+          <div class="sub">Who gained or lost access, and when</div>
+        </div>
+        <i class="pi pi-chevron-right trail" aria-hidden="true" />
       </li>
     </ul>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-else-if="saved" class="muted small">Saved.</p>
+    <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
-    <button type="button" class="btn block" style="margin-top: 24px" @click="signOut"><Icon name="signout" /> Sign out</button>
-
-    <ConfirmDialog
-      :open="confirmViewer"
-      title="Switch to viewer"
-      message="A viewer account cannot hold videos. Your collection must be empty first. Any folders and QR codes are removed. Continue?"
-      confirm-label="Switch to viewer"
-      danger
-      :busy="busy"
-      @close="cancelViewer"
-      @confirm="becomeViewer"
-    />
+    <Button label="Sign out" icon="pi pi-sign-out" severity="secondary" outlined fluid style="margin-top: 8px" @click="signOut" />
   </section>
 </template>
+
+<style scoped>
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
+  font-size: 1.375rem;
+  font-weight: 600;
+}
+</style>
