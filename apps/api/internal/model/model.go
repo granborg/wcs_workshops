@@ -277,11 +277,11 @@ type RedeemResult struct {
 // ToSummary converts a video row to its JSON shape.
 func (v Video) ToSummary() VideoSummary {
 	return VideoSummary{
-		ID:          v.ID,
-		OwnerID:     v.OwnerID,
-		Title:       v.Title,
-		DirectoryID: v.DirectoryID,
-		Status:      v.Status,
+		ID:           v.ID,
+		OwnerID:      v.OwnerID,
+		Title:        v.Title,
+		DirectoryID:  v.DirectoryID,
+		Status:       v.Status,
 		DurationSec:  v.DurationSec,
 		Width:        v.Width,
 		Height:       v.Height,
