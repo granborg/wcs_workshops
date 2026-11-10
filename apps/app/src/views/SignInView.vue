@@ -97,15 +97,15 @@ function switchMode(next: Mode) {
 
 <template>
   <div class="signin">
-    <div class="brand">
-      <span class="logo" aria-hidden="true"><i class="pi pi-video" /></span>
-      <h1>WCS Workshops</h1>
-      <p class="muted">
-        {{ mode === 'create' ? 'Create an account to see the videos shared with you.' : 'Sign in to see the videos shared with you.' }}
-      </p>
-    </div>
-
     <div class="panel">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><i class="pi pi-video" /></span>
+        <h1>WCS Workshops</h1>
+        <p class="muted">
+          {{ mode === 'create' ? 'Create an account to see the videos shared with you.' : 'Sign in to see the videos shared with you.' }}
+        </p>
+      </div>
+
       <form @submit.prevent="submitEmail">
         <div v-if="mode === 'create'" class="field">
           <label for="signin-name">Name (optional)</label>
@@ -212,6 +212,7 @@ function switchMode(next: Mode) {
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 16px;
+  box-shadow: var(--card-shadow);
 }
 
 .switch {

@@ -195,30 +195,32 @@ function dirName(node: DirectoryNode) {
   </ul>
 
   <template v-if="tree && current">
-    <Breadcrumb v-if="crumbs.length > 1" :model="crumbItems" aria-label="Folder path" />
+    <div class="card head">
+      <Breadcrumb v-if="crumbs.length > 1" :model="crumbItems" aria-label="Folder path" />
 
-    <div class="page-head">
-      <h2>{{ dirName(current) }}</h2>
-      <template v-if="canManage">
-        <Button
-          label="New folder"
-          icon="pi pi-folder-plus"
-          severity="secondary"
-          outlined
-          size="small"
-          @click="dialog = 'newFolder'"
-        />
-        <Button
-          icon="pi pi-ellipsis-v"
-          severity="secondary"
-          text
-          rounded
-          aria-label="Folder options"
-          @click="openMenu($event, 'directory', current.id, dirName(current), current.parentId ?? current.id)"
-        />
-      </template>
+      <div class="page-head">
+        <h2>{{ dirName(current) }}</h2>
+        <template v-if="canManage">
+          <Button
+            label="New folder"
+            icon="pi pi-folder-plus"
+            severity="secondary"
+            outlined
+            size="small"
+            @click="dialog = 'newFolder'"
+          />
+          <Button
+            icon="pi pi-ellipsis-v"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Folder options"
+            @click="openMenu($event, 'directory', current.id, dirName(current), current.parentId ?? current.id)"
+          />
+        </template>
+      </div>
+      <p v-if="canManage && crumbs.length <= 1" class="hint">You manage this collection.</p>
     </div>
-    <p v-if="canManage && crumbs.length <= 1" class="hint">You manage this collection.</p>
 
     <div v-if="current.children.length === 0 && current.videos.length === 0" class="empty">
       <i class="pi pi-folder-open" aria-hidden="true" />
@@ -331,6 +333,21 @@ function dirName(node: DirectoryNode) {
 </template>
 
 <style scoped>
+/* The breadcrumb, folder name, and hint share one card. */
+.head .p-breadcrumb {
+  padding: 0 0 8px;
+  background: none;
+}
+
+.head .page-head,
+.head .hint {
+  margin-bottom: 0;
+}
+
+.head .hint {
+  margin-top: 4px;
+}
+
 :deep(.p-breadcrumb-list) {
   flex-wrap: wrap;
 }

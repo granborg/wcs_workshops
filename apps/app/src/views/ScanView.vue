@@ -79,7 +79,7 @@ function openResult() {
 </script>
 
 <template>
-  <div class="narrow scan" style="max-width: 420px; text-align: center">
+  <div class="narrow scan card" style="max-width: 420px; text-align: center">
     <div class="hero" aria-hidden="true"><i class="pi pi-qrcode" /></div>
     <p class="muted">Scan a creator's QR code to add their folder or video to your library.</p>
 
@@ -128,9 +128,9 @@ function openResult() {
 </template>
 
 <style scoped>
-/* The Divider label sits on the page, not on a card: match the page background. */
+/* The Divider label sits on the card: match the card background. */
 .scan {
-  --p-divider-content-background: var(--app-bg);
+  --p-divider-content-background: var(--p-content-background);
 }
 
 .hero {

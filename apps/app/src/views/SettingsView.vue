@@ -96,7 +96,7 @@ async function signOut() {
 </script>
 
 <template>
-  <section v-if="auth.me" class="narrow">
+  <section v-if="auth.me" class="narrow card">
     <div class="profile">
       <span class="avatar" aria-hidden="true">{{ (auth.me.name || '?').slice(0, 1).toUpperCase() }}</span>
       <div style="min-width: 0">

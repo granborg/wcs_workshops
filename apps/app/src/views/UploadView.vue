@@ -83,7 +83,7 @@ async function start() {
 </script>
 
 <template>
-  <form class="narrow" @submit.prevent="start">
+  <form class="narrow card" @submit.prevent="start">
     <div class="field">
       <label for="file">Video file</label>
       <input id="file" ref="fileInput" type="file" accept="video/*" hidden :disabled="busy" @change="onFile" />

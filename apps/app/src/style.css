@@ -6,13 +6,16 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --radius: var(--p-border-radius-lg, 10px);
-  /* Page background. Components that sit on the page (not on a card) use it, e.g. the Divider label. */
+  /* Page background, behind the logo. Text does not sit on it directly: it goes on a card. */
   --app-bg: var(--p-surface-50);
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 14px rgb(0 0 0 / 0.08);
 }
 
 /* Dark mode: services/colorMode.ts sets this class from the user's choice or the device setting. */
 :root.app-dark {
   --app-bg: var(--p-surface-950);
+  /* Shadows must be darker to show on a dark page. */
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 18px rgb(0 0 0 / 0.45);
 }
 
 * {
@@ -33,6 +36,27 @@ body {
   color: var(--p-text-color);
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Milwaukee West Coast Swing logo behind every page. The image is white lines on a transparent background:
+ * white on the dark theme, inverted to black on the light theme. Low opacity keeps the page text readable.
+ * z-index -1 puts it above the body background color and below all page content.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url('./assets/milwaukee-wcs.png') no-repeat center / min(92vw, 900px) auto;
+  opacity: 0.08;
+  filter: invert(1);
+}
+
+:root.app-dark body::before {
+  opacity: 0.1;
+  filter: none;
 }
 
 #app {
@@ -68,37 +92,32 @@ a {
   top: 0;
   z-index: 10;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 56px;
-  padding: calc(var(--safe-top) + 6px) 8px 6px 16px;
-  background: color-mix(in srgb, var(--p-content-background) 88%, transparent);
-  backdrop-filter: blur(12px);
+  justify-content: center;
+  padding: calc(var(--safe-top) + 6px) 8px 6px;
+  background: var(--p-content-background);
+  box-shadow: var(--card-shadow);
   border-bottom: 1px solid var(--p-content-border-color);
-}
-
-.appbar h1 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .appbar nav {
   display: flex;
-  gap: 2px;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 480px;
 }
 
+/* Icon above a short label. Tabs share the width equally, and a long label is cut with an ellipsis. */
 .navbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 88px;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  gap: 3px;
+  padding: 6px 4px;
   border-radius: 12px;
   color: var(--p-text-muted-color);
   text-decoration: none;
@@ -107,6 +126,16 @@ a {
 
 .navbtn .pi {
   font-size: 1.25rem;
+}
+
+.navlabel {
+  max-width: 100%;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .navbtn:hover {
@@ -121,7 +150,7 @@ a {
 
 .navbtn.active {
   color: var(--p-primary-color);
-  background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+  background: color-mix(in srgb, var(--p-primary-color) 12%, var(--p-content-background));
 }
 
 main.page {
@@ -135,6 +164,27 @@ main.page {
 .narrow {
   max-width: 480px;
   margin: 0 auto;
+}
+
+/* ---------- cards: all text on the page sits on one ---------- */
+
+.card {
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+}
+
+/* A list or a card inside a card does not need a second shadow. */
+.card .list,
+.card .p-card {
+  box-shadow: none;
+}
+
+.page-head.card {
+  padding: 8px 12px;
 }
 
 .page-head {
@@ -162,6 +212,7 @@ main.page {
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
@@ -273,9 +324,14 @@ main.page {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  margin-bottom: 14px;
   padding: 48px 16px;
   text-align: center;
   color: var(--p-text-muted-color);
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
 }
 
 /* Only the large icon of the empty state, not icons inside its buttons. */
@@ -291,6 +347,22 @@ main.page {
 
 .empty .p-button {
   margin-top: 12px;
+}
+
+/*
+ * Outlined and text buttons are transparent in Aura, so the background logo shows through them.
+ * Give them a solid background. The hover color is also solid (surface.100 light, surface.800 dark).
+ */
+.p-button-outlined,
+.p-button-text {
+  background-color: var(--p-content-background) !important;
+}
+
+.p-button-outlined:not(:disabled):hover,
+.p-button-outlined:not(:disabled):active,
+.p-button-text:not(:disabled):hover,
+.p-button-text:not(:disabled):active {
+  background-color: var(--p-content-hover-background) !important;
 }
 
 /* <Button as="router-link"> renders an <a>; links are underlined by default. */

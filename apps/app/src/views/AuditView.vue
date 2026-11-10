@@ -56,7 +56,7 @@ function describe(e: AuditEventInfo): string {
 </script>
 
 <template>
-  <div class="page-head">
+  <div class="page-head card">
     <Button icon="pi pi-arrow-left" severity="secondary" text rounded aria-label="Back" @click="router.back()" />
     <h2>Audit log</h2>
   </div>
