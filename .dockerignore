@@ -11,8 +11,9 @@ apps/api/web/dist/*
 *.db
 *.db-wal
 *.db-shm
-.env
-.env.*
-!.env.example
+# Local env files anywhere in the tree. Vite would bake VITE_* values from them into the production build.
+**/.env
+**/.env.*
+!**/.env.example
 docs
 *.md

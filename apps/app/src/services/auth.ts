@@ -25,7 +25,8 @@ export interface AuthService {
   getHeaders(): Promise<Record<string, string>>
 }
 
-const EMULATOR = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST
+// Dev server only. A production build never talks to the emulator, whatever the env files say.
+const EMULATOR = import.meta.env.DEV ? import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST : undefined
 
 // Against the emulator any non-empty config works; the demo- project prefix needs no real project.
 // `||`, not `??`: Vite turns an empty line such as `VITE_FIREBASE_API_KEY=` into "", not undefined.
