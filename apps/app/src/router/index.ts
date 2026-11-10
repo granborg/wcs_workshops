@@ -24,6 +24,13 @@ export const router = createRouter({
     { path: '/scan', name: 'scan', component: () => import('@/views/ScanView.vue'), meta: { title: 'Scan QR code' } },
     // QR codes and copied share links point here. The scan page redeems ?code= on load, after sign-in if needed.
     { path: '/r/:code', redirect: (to) => ({ name: 'scan', query: { code: String(to.params.code) } }) },
+    // Upload links point here. Any signed-in user can upload the file of the video the link is for.
+    {
+      path: '/up/:code',
+      name: 'upload-link',
+      component: () => import('@/views/UploadLinkView.vue'),
+      meta: { title: 'Upload' },
+    },
     {
       path: '/upload',
       name: 'upload',

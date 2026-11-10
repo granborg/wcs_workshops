@@ -16,7 +16,14 @@ export interface MoveTarget {
   currentDirectoryId: string
 }
 
-const props = defineProps<{ open: boolean; target: MoveTarget | null; root: DirectoryNode; creatorName: string }>()
+const props = defineProps<{
+  open: boolean
+  target: MoveTarget | null
+  root: DirectoryNode
+  creatorName: string
+  /** Folders the user may move into. Null means all (the owner). An admin may move only within their folders. */
+  allowed?: Set<string> | null
+}>()
 const emit = defineEmits<{ close: []; moved: [] }>()
 
 const choice = ref('')
@@ -34,7 +41,7 @@ const options = computed(() => {
     id: d.id,
     depth: d.depth,
     label: d.depth === 0 ? props.creatorName : d.name,
-    disabled: excluded.has(d.id),
+    disabled: excluded.has(d.id) || (!!props.allowed && !props.allowed.has(d.id)),
   }))
 })
 

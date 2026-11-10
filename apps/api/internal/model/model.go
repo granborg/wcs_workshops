@@ -25,6 +25,9 @@ const QRScheme = "wcsw://redeem/"
 // RedeemPath is the web route a QR link points to: <public URL>/r/<code>.
 const RedeemPath = "/r/"
 
+// UploadLinkPath is the web route an upload link points to: <public URL>/up/<code>.
+const UploadLinkPath = "/up/"
+
 // ISO formats a time like JavaScript's Date#toISOString.
 func ISO(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z07:00") }
 
@@ -83,6 +86,30 @@ type QrCode struct {
 	Redemptions int
 }
 
+// CollectionAdmin lets another creator manage a folder (and everything under it) of the owner's collection.
+type CollectionAdmin struct {
+	ID          string
+	OwnerID     string
+	DirectoryID string
+	UserID      string
+	CreatedAt   time.Time
+}
+
+// UploadLink lets any signed-in user upload the file of one video that has no file yet.
+type UploadLink struct {
+	ID         string
+	Code       string
+	OwnerID    string
+	VideoID    string
+	CreatedIP  *string
+	UsedBy     *string
+	UsedByName *string
+	UsedIP     *string
+	UsedAt     *time.Time
+	RevokedAt  *time.Time
+	CreatedAt  time.Time
+}
+
 type AccessGrant struct {
 	ID          string
 	UserID      string
@@ -110,6 +137,8 @@ type CreatorSummary struct {
 	Name            string `json:"name"`
 	RootDirectoryID string `json:"rootDirectoryId"`
 	Own             bool   `json:"own"`
+	// Admin is true when the signed-in user is an admin of at least one folder of this collection.
+	Admin bool `json:"admin"`
 }
 
 type VideoSummary struct {
@@ -120,6 +149,8 @@ type VideoSummary struct {
 	Status      string `json:"status"`
 	DurationSec *int   `json:"durationSec"`
 	CreatedAt   string `json:"createdAt"`
+	// CanManage is set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video.
+	CanManage bool `json:"canManage"`
 }
 
 type DirectoryNode struct {
@@ -131,9 +162,13 @@ type DirectoryNode struct {
 }
 
 type LibraryTree struct {
-	Creator   CreatorSummary `json:"creator"`
-	CanManage bool           `json:"canManage"`
-	Root      *DirectoryNode `json:"root"`
+	Creator CreatorSummary `json:"creator"`
+	// CanManage is true for the owner, who can also manage folders and admins.
+	CanManage bool `json:"canManage"`
+	// AdminDirectoryIDs are the folders where the signed-in user is an admin. The user manages the videos,
+	// share codes and access of these folders and of every folder under them.
+	AdminDirectoryIDs []string       `json:"adminDirectoryIds"`
+	Root              *DirectoryNode `json:"root"`
 }
 
 type DirectoryRecord struct {
@@ -181,6 +216,35 @@ type AuditEventInfo struct {
 	// TargetName is the folder name or video title, as the app shows it. A root folder shows as the creator's name.
 	TargetName string  `json:"targetName"`
 	QrCodeID   *string `json:"qrCodeId"`
+}
+
+type AdminInfo struct {
+	ID          string  `json:"id"`
+	User        UserRef `json:"user"`
+	Email       *string `json:"email"`
+	DirectoryID string  `json:"directoryId"`
+	CreatedAt   string  `json:"createdAt"`
+}
+
+// UploadLinkInfo is an upload link as its owner or an admin sees it.
+type UploadLinkInfo struct {
+	ID        string   `json:"id"`
+	Code      string   `json:"code"`
+	URL       string   `json:"url"`
+	VideoID   string   `json:"videoId"`
+	UsedBy    *UserRef `json:"usedBy"`
+	UsedAt    *string  `json:"usedAt"`
+	RevokedAt *string  `json:"revokedAt"`
+	CreatedAt string   `json:"createdAt"`
+}
+
+// UploadLinkTarget is what the person who opens an upload link sees.
+type UploadLinkTarget struct {
+	VideoID     string `json:"videoId"`
+	VideoTitle  string `json:"videoTitle"`
+	CreatorName string `json:"creatorName"`
+	// Open is false when the video already has a file: the link no longer accepts uploads.
+	Open bool `json:"open"`
 }
 
 type UploadTicket struct {
@@ -234,4 +298,30 @@ func (q QrCode) ToInfo(baseURL string) QrCodeInfo {
 		CreatedAt:   ISO(q.CreatedAt),
 		Redemptions: q.Redemptions,
 	}
+}
+
+// ToInfo converts an upload link row to its JSON shape. baseURL is the public origin of the web app.
+func (l UploadLink) ToInfo(baseURL string) UploadLinkInfo {
+	info := UploadLinkInfo{
+		ID:        l.ID,
+		Code:      l.Code,
+		URL:       baseURL + UploadLinkPath + l.Code,
+		VideoID:   l.VideoID,
+		UsedAt:    ISOPtr(l.UsedAt),
+		RevokedAt: ISOPtr(l.RevokedAt),
+		CreatedAt: ISO(l.CreatedAt),
+	}
+	if l.UsedBy != nil {
+		name := "Deleted user"
+		if l.UsedByName != nil {
+			name = *l.UsedByName
+		}
+		info.UsedBy = &UserRef{ID: *l.UsedBy, Name: name}
+	}
+	return info
+}
+
+// HasFile reports whether the video has a file on Vimeo, or one that is on its way.
+func (v Video) HasFile() bool {
+	return v.Status == StatusProcessing || v.Status == StatusReady
 }

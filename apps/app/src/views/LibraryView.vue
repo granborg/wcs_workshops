@@ -65,7 +65,7 @@ function open(c: CreatorSummary) {
       <span class="lead"><i class="pi" :class="c.own ? 'pi-star' : 'pi-folder'" aria-hidden="true" /></span>
       <div class="grow">
         <div class="title" :style="c.own ? 'font-weight: 700' : ''">{{ c.name }}</div>
-        <div class="sub">{{ c.own ? 'Your collection' : 'Shared with you' }}</div>
+        <div class="sub">{{ c.own ? 'Your collection' : c.admin ? 'You are an admin' : 'Shared with you' }}</div>
       </div>
       <i class="pi pi-chevron-right trail" aria-hidden="true" />
     </li>

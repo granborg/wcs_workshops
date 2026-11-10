@@ -6,15 +6,14 @@ import Message from 'primevue/message'
 import Skeleton from 'primevue/skeleton'
 import type { PlaybackInfo, VideoSummary } from '@/types'
 import { api, errorMessage } from '@/services/api'
-import { useAuthStore } from '@/stores/auth'
 import { useDelayedFlag } from '@/composables/useDelayedFlag'
 import { useVideoUpload } from '@/composables/useVideoUpload'
 import UploadProgress from '@/components/UploadProgress.vue'
 import VideoFilePicker from '@/components/VideoFilePicker.vue'
+import UploadLinkDialog from '@/components/UploadLinkDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
-const auth = useAuthStore()
 const videoId = String(route.params.videoId)
 
 const video = ref<VideoSummary | null>(null)
@@ -24,13 +23,15 @@ const loading = ref(true)
 const slow = useDelayedFlag(loading)
 let poll: ReturnType<typeof setTimeout> | null = null
 
-// The owner can upload the file to a placeholder, retry an upload that did not finish, or replace a failed one.
+// The owner or an admin can upload the file to a placeholder, retry an upload that did not finish, or replace a
+// failed one. They can also give an upload link to someone else, for example the person who filmed the workshop.
 const { phase, progress, busy: uploading, upload } = useVideoUpload()
 const file = ref<File | null>(null)
 const uploadError = ref<string | null>(null)
-const isOwner = computed(() => !!video.value && video.value.ownerId === auth.me?.id)
+const showLinkDialog = ref(false)
+const canManage = computed(() => video.value?.canManage ?? false)
 const canUpload = computed(
-  () => isOwner.value && (uploading.value || ['placeholder', 'uploading', 'failed'].includes(video.value!.status)),
+  () => canManage.value && (uploading.value || ['placeholder', 'uploading', 'failed'].includes(video.value!.status)),
 )
 
 async function load() {
@@ -89,7 +90,7 @@ onBeforeUnmount(() => {
   </div>
   <Skeleton v-else-if="slow" width="100%" style="aspect-ratio: 16 / 9; height: auto" border-radius="10px" />
 
-  <div v-if="video?.status === 'placeholder' && !isOwner" class="empty">
+  <div v-if="video?.status === 'placeholder' && !canManage" class="empty">
     <i class="pi pi-clock" aria-hidden="true" />
     <p><strong>Not uploaded yet</strong></p>
     <p>The creator has not uploaded this video yet. It plays here when it is ready.</p>
@@ -121,7 +122,19 @@ onBeforeUnmount(() => {
     <Message v-if="uploadError" severity="error" class="mb">{{ uploadError }}</Message>
     <Button type="submit" label="Upload" icon="pi pi-upload" fluid :loading="uploading" :disabled="!file" />
     <p class="hint" style="margin: 12px 0 0">Keep the app open until the upload finishes.</p>
+    <Button
+      label="Upload link for someone else"
+      icon="pi pi-cloud-upload"
+      severity="secondary"
+      outlined
+      fluid
+      style="margin-top: 14px"
+      :disabled="uploading"
+      @click="showLinkDialog = true"
+    />
   </form>
+
+  <UploadLinkDialog :open="showLinkDialog" :video-id="video?.id ?? null" :name="video?.title ?? ''" @close="showLinkDialog = false" />
 </template>
 
 <style scoped>

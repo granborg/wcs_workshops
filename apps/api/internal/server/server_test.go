@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,6 +39,7 @@ func (fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, erro
 type client struct {
 	t    *testing.T
 	base string
+	db   *sql.DB // for the few states the HTTP API cannot reach without Vimeo
 }
 
 func newClient(t *testing.T) client {
@@ -54,7 +56,7 @@ func newClient(t *testing.T) client {
 	srv := New(cfg, database, fakeVerifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return client{t: t, base: ts.URL}
+	return client{t: t, base: ts.URL, db: database}
 }
 
 func (c client) do(user, method, path string, body, out any) (int, string) {
@@ -179,6 +181,154 @@ func TestPlaceholder(t *testing.T) {
 	c.must(creator, "GET", "/videos/"+v.ID, nil, &seen)
 	if seen.Status != model.StatusPlaceholder {
 		t.Fatalf("failed ticket changed status to %q", seen.Status)
+	}
+}
+
+// An admin of Season 1 manages videos, codes and access there and below, but not elsewhere, and not folders.
+func TestCollectionAdmins(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+	const admin = "admin@example.com"
+	var adminMe model.Me
+	c.must(admin, "PATCH", "/me", anyMap{"role": "creator"}, &adminMe)
+
+	add := anyMap{"directoryId": f.season.ID, "email": "ADMIN@example.com"}
+	c.expect(403, viewer, "POST", "/admins", add)
+	c.expect(404, admin, "POST", "/admins", add) // only the owner adds admins
+	c.expect(400, creator, "POST", "/admins", anyMap{"directoryId": f.season.ID, "email": viewer})
+	c.expect(400, creator, "POST", "/admins", anyMap{"directoryId": f.season.ID, "email": creator})
+	var a model.AdminInfo
+	c.must(creator, "POST", "/admins", add, &a)
+	if a.User.ID != adminMe.ID {
+		t.Fatalf("admin = %+v", a)
+	}
+	var admins []model.AdminInfo
+	c.must(creator, "GET", "/admins?directoryId="+f.season.ID, nil, &admins)
+	if len(admins) != 1 {
+		t.Fatalf("admins = %+v", admins)
+	}
+
+	var lib []model.CreatorSummary
+	c.must(admin, "GET", "/library", nil, &lib)
+	if len(lib) != 2 || lib[1].ID != f.me.ID || !lib[1].Admin {
+		t.Fatalf("admin library = %+v", lib)
+	}
+	var tree model.LibraryTree
+	c.must(admin, "GET", "/library/"+f.me.ID, nil, &tree)
+	if tree.CanManage || len(tree.AdminDirectoryIDs) != 1 || len(tree.Root.Children) != 1 || tree.Root.Children[0].Name != "Season 1" {
+		t.Fatalf("admin tree: manage=%v admin=%v children=%d", tree.CanManage, tree.AdminDirectoryIDs, len(tree.Root.Children))
+	}
+
+	// Videos: add under Season 1 (also in Week 1, below it), not in Private.
+	var v model.VideoSummary
+	c.must(admin, "POST", "/videos/placeholder", anyMap{"title": "Filmed", "directoryId": f.week.ID}, &v)
+	if v.OwnerID != f.me.ID {
+		t.Fatalf("video owner = %q, want the collection owner", v.OwnerID)
+	}
+	c.expect(404, admin, "POST", "/videos/placeholder", anyMap{"title": "No", "directoryId": f.private.ID})
+	c.must(admin, "GET", "/videos/"+v.ID, nil, &v)
+	if !v.CanManage {
+		t.Fatal("admin should manage the video")
+	}
+	c.expect(404, admin, "PATCH", "/videos/"+v.ID, anyMap{"directoryId": f.private.ID})
+	c.expect(404, admin, "PATCH", "/videos/"+v.ID, anyMap{"directoryId": adminMe.RootDirectoryID})
+	c.must(admin, "PATCH", "/videos/"+v.ID, anyMap{"directoryId": f.season.ID}, nil)
+
+	// Folders stay with the owner.
+	c.expect(404, admin, "POST", "/directories", anyMap{"name": "Nope", "parentId": f.season.ID})
+
+	// Codes and access.
+	var qr model.QrCodeInfo
+	c.must(admin, "POST", "/share", anyMap{"videoId": v.ID}, &qr)
+	c.expect(404, admin, "POST", "/share", anyMap{"directoryId": f.private.ID})
+	c.must(viewer, "POST", "/redeem", anyMap{"code": qr.Code}, nil)
+	var grants []model.AccessGrantInfo
+	c.must(admin, "GET", "/access?videoId="+v.ID, nil, &grants)
+	if len(grants) != 1 {
+		t.Fatalf("grants = %+v", grants)
+	}
+	c.expect(204, admin, "DELETE", "/access/"+grants[0].ID, nil)
+	c.must(admin, "DELETE", "/share/"+qr.ID, nil, nil)
+	var codes []model.QrCodeInfo
+	c.must(creator, "GET", "/share?videoId="+v.ID, nil, &codes)
+	if len(codes) != 1 || codes[0].RevokedAt == nil {
+		t.Fatalf("owner should see the code the admin made and revoked: %+v", codes)
+	}
+
+	c.expect(204, admin, "DELETE", "/videos/"+v.ID, nil)
+
+	c.expect(404, admin, "DELETE", "/admins/"+a.ID, nil)
+	c.expect(204, creator, "DELETE", "/admins/"+a.ID, nil)
+	c.expect(404, admin, "POST", "/videos/placeholder", anyMap{"title": "Late", "directoryId": f.week.ID})
+	c.expect(403, admin, "GET", "/library/"+f.me.ID, nil)
+}
+
+// Any signed-in user can open an upload link. Vimeo is not configured here, so the upload itself answers 503.
+func TestUploadLinks(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Week 3", "directoryId": f.week.ID}, &v)
+
+	c.expect(403, viewer, "POST", "/upload-links", anyMap{"videoId": v.ID})
+	var l model.UploadLinkInfo
+	c.must(creator, "POST", "/upload-links", anyMap{"videoId": v.ID}, &l)
+	if !strings.HasSuffix(l.URL, model.UploadLinkPath+l.Code) {
+		t.Fatalf("url = %q", l.URL)
+	}
+
+	var target model.UploadLinkTarget
+	c.must(viewer, "GET", "/upload-links/code/"+l.Code, nil, &target)
+	if !target.Open || target.VideoTitle != "Week 3" || target.CreatorName != "Smoke Creator" {
+		t.Fatalf("target = %+v", target)
+	}
+	c.expect(400, viewer, "POST", "/upload-links/code/"+l.Code+"/ticket", anyMap{"sizeBytes": 0})
+	c.expect(503, viewer, "POST", "/upload-links/code/"+l.Code+"/ticket", anyMap{"sizeBytes": 10})
+	c.expect(400, viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil)
+	c.expect(404, viewer, "GET", "/upload-links/code/not-a-real-code", nil)
+
+	// Finishing an upload gives the uploader access to watch the video. Without Vimeo the ticket step fails,
+	// so record its effect (the link was used by the viewer) in the database directly.
+	c.expect(404, viewer, "GET", "/videos/"+v.ID, nil)
+	var viewerMe model.Me
+	c.must(viewer, "GET", "/me", nil, &viewerMe)
+	if _, err := c.db.Exec(`UPDATE upload_links SET used_by = ?, used_at = 1 WHERE id = ?`, viewerMe.ID, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.must(viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil, &target)
+	c.must(viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil, &target) // a retry adds no second grant
+	c.must(viewer, "GET", "/videos/"+v.ID, nil, nil)
+	var grants []model.AccessGrantInfo
+	c.must(creator, "GET", "/access?videoId="+v.ID, nil, &grants)
+	if len(grants) != 1 || grants[0].User.ID != viewerMe.ID || grants[0].QrCodeID != nil {
+		t.Fatalf("uploader grant = %+v", grants)
+	}
+
+	var links []model.UploadLinkInfo
+	c.must(creator, "GET", "/upload-links?videoId="+v.ID, nil, &links)
+	if len(links) != 1 {
+		t.Fatalf("links = %+v", links)
+	}
+	c.expect(403, viewer, "DELETE", "/upload-links/"+l.ID, nil)
+	c.must(creator, "DELETE", "/upload-links/"+l.ID, nil, &l)
+	if l.RevokedAt == nil {
+		t.Fatal("link not revoked")
+	}
+	c.expect(404, viewer, "GET", "/upload-links/code/"+l.Code, nil)
+
+	var audit []model.AuditEventInfo
+	c.must(creator, "GET", "/audit", nil, &audit)
+	seen := map[string]bool{}
+	for _, e := range audit {
+		if strings.HasPrefix(e.Type, "upload_link.") {
+			seen[e.Type] = true
+			if e.TargetName != "Week 3" {
+				t.Errorf("%s targetName = %q", e.Type, e.TargetName)
+			}
+		}
+	}
+	if !seen["upload_link.created"] || !seen["upload_link.revoked"] {
+		t.Fatalf("audit upload link events = %v", seen)
 	}
 }
 

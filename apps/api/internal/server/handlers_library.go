@@ -10,7 +10,8 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/store"
 )
 
-// listLibrary returns creators who shared with me. My own collection comes first when I am a creator.
+// listLibrary returns my own collection first (when I am a creator), then the collections of creators who
+// shared with me or made me an admin.
 func (s *Server) listLibrary(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	ctx := r.Context()
 	out := make([]model.CreatorSummary, 0)
@@ -21,13 +22,24 @@ func (s *Server) listLibrary(w http.ResponseWriter, r *http.Request, u *model.Us
 			return err
 		}
 		if root != nil {
-			out = append(out, creatorSummary(u, root.ID, u.ID))
+			out = append(out, creatorSummary(u, root.ID, u.ID, false))
 		}
 	}
 
 	ids, err := s.st.CreatorsSharedWith(ctx, u.ID)
 	if err != nil {
 		return err
+	}
+	adminOf := map[string]bool{}
+	if u.Role == model.RoleCreator {
+		owners, err := s.st.OwnersAdministeredBy(ctx, u.ID)
+		if err != nil {
+			return err
+		}
+		for _, id := range owners {
+			adminOf[id] = true
+			ids = append(ids, id)
+		}
 	}
 	creators, err := s.st.ListUsersByIDs(ctx, ids)
 	if err != nil {
@@ -42,7 +54,7 @@ func (s *Server) listLibrary(w http.ResponseWriter, r *http.Request, u *model.Us
 			return err
 		}
 		if root != nil {
-			out = append(out, creatorSummary(&creators[i], root.ID, u.ID))
+			out = append(out, creatorSummary(&creators[i], root.ID, u.ID, adminOf[creators[i].ID]))
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -73,21 +85,23 @@ func (s *Server) getLibraryTree(w http.ResponseWriter, r *http.Request, u *model
 
 	own := creator.ID == u.ID
 	var grants *access.Grants
+	adminDirs := []string{}
 	if !own {
-		dirs, vids, err := s.st.ActiveGrantRefs(ctx, u.ID, creatorID)
+		// Admins see everything under their folders, as if those folders were shared with them.
+		grants, adminDirs, err = s.viewerGrants(ctx, u, creatorID)
 		if err != nil {
 			return err
 		}
-		grants = access.NewGrants(dirs, vids)
 		if grants.Empty() {
 			return httpx.Forbidden("No access to this collection")
 		}
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, model.LibraryTree{
-		Creator:   creatorSummary(creator, col.Root.ID, u.ID),
-		CanManage: own,
-		Root:      col.BuildTree(grants),
+		Creator:           creatorSummary(creator, col.Root.ID, u.ID, len(adminDirs) > 0),
+		CanManage:         own,
+		AdminDirectoryIDs: adminDirs,
+		Root:              col.BuildTree(grants),
 	})
 	return nil
 }

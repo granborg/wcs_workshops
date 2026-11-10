@@ -4,12 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
-import type { LibraryTree } from '@/types'
+import type { CreatorSummary, LibraryTree } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useVideoUpload } from '@/composables/useVideoUpload'
-import { flatten } from '@/utils/tree'
+import { flatten, pathTo } from '@/utils/tree'
 import FolderSelect from '@/components/FolderSelect.vue'
 import UploadProgress from '@/components/UploadProgress.vue'
 import VideoFilePicker from '@/components/VideoFilePicker.vue'
@@ -27,6 +28,9 @@ const modes = [
 ]
 const mode = ref<'now' | 'later'>('now')
 
+// The collection to add to: the user's own, or one where they are an admin (?creator= from the collection page).
+const collections = ref<CreatorSummary[]>([])
+const creatorId = ref(typeof route.query.creator === 'string' ? route.query.creator : (auth.me?.id ?? ''))
 const tree = ref<LibraryTree | null>(null)
 const file = ref<File | null>(null)
 const title = ref('')
@@ -34,22 +38,48 @@ const directoryId = ref(typeof route.query.dir === 'string' ? route.query.dir : 
 const creating = ref(false)
 const error = ref<string | null>(null)
 
-const folders = computed(() =>
-  tree.value
-    ? flatten(tree.value.root).map((d) => ({ id: d.id, depth: d.depth, label: d.depth === 0 ? tree.value!.creator.name : d.name }))
-    : [],
-)
+// An admin sees the folders they can see, but can add only to the folders they manage.
+const folders = computed(() => {
+  const t = tree.value
+  if (!t) return []
+  const adminIds = new Set(t.adminDirectoryIds)
+  const manages = (id: string) => t.canManage || pathTo(t.root, id).some((n) => adminIds.has(n.id))
+  return flatten(t.root).map((d) => ({
+    id: d.id,
+    depth: d.depth,
+    label: d.depth === 0 ? t.creator.name : d.name,
+    disabled: !manages(d.id),
+  }))
+})
 const busy = computed(() => uploading.value || creating.value)
 const canSubmit = computed(() => !!title.value.trim() && !!directoryId.value && (mode.value === 'later' || !!file.value))
 
+async function loadTree() {
+  error.value = null
+  try {
+    tree.value = await api.library.tree(creatorId.value)
+    if (!folders.value.some((f) => f.id === directoryId.value && !f.disabled)) {
+      directoryId.value = folders.value.find((f) => !f.disabled)?.id ?? ''
+    }
+  } catch (err) {
+    tree.value = null
+    error.value = errorMessage(err)
+  }
+}
+
 onMounted(async () => {
   if (!auth.me) return
+  void loadTree()
   try {
-    tree.value = await api.library.tree(auth.me.id)
-    if (!directoryId.value) directoryId.value = tree.value.root.id
+    collections.value = (await api.library.list()).filter((c) => c.own || c.admin)
   } catch (err) {
     error.value = errorMessage(err)
   }
+})
+
+watch(creatorId, () => {
+  directoryId.value = ''
+  void loadTree()
 })
 
 // Suggest the file name as the title.
@@ -68,7 +98,7 @@ async function start() {
       const t = title.value.trim()
       await upload(file.value!, (size) => api.videos.ticket(t, directoryId.value, size))
     }
-    await router.push({ name: 'collection', params: { creatorId: auth.me!.id }, query: { dir: directoryId.value } })
+    await router.push({ name: 'collection', params: { creatorId: creatorId.value }, query: { dir: directoryId.value } })
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
@@ -103,6 +133,20 @@ async function start() {
     <div class="field">
       <label for="title">Title</label>
       <InputText id="title" v-model="title" :disabled="busy" maxlength="120" fluid />
+    </div>
+
+    <div v-if="collections.length > 1" class="field">
+      <label for="collection">Collection</label>
+      <Select
+        v-model="creatorId"
+        input-id="collection"
+        :options="collections"
+        option-label="name"
+        option-value="id"
+        :disabled="busy"
+        fluid
+      />
+      <span class="hint">You can add videos to your own collection and to the folders where you are an admin.</span>
     </div>
 
     <div class="field">

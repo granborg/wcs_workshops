@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { RedeemResult } from '@/types'
 import { api, errorMessage } from '@/services/api'
 import { isNativeScanner, scanQrCode, scannerAvailable } from '@/services/scanner'
+import { uploadLinkCode } from '@/services/deeplinks'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Divider from 'primevue/divider'
@@ -25,6 +26,12 @@ const webScanning = ref(false)
 async function redeem(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return
+  // A scanned or pasted upload link opens the upload page instead of adding to the library.
+  const uploadCode = uploadLinkCode(trimmed)
+  if (uploadCode) {
+    void router.push({ name: 'upload-link', params: { code: uploadCode } })
+    return
+  }
   busy.value = true
   error.value = null
   result.value = null

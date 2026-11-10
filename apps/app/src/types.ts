@@ -8,7 +8,15 @@ export type UserRole = (typeof USER_ROLES)[number]
 export const VIDEO_STATUSES = ['placeholder', 'uploading', 'processing', 'ready', 'failed'] as const
 export type VideoStatus = (typeof VIDEO_STATUSES)[number]
 
-export const AUDIT_TYPES = ['qr.created', 'qr.revoked', 'access.granted', 'access.revoked'] as const
+export const AUDIT_TYPES = [
+  'qr.created',
+  'qr.revoked',
+  'access.granted',
+  'access.revoked',
+  'upload_link.created',
+  'upload_link.used',
+  'upload_link.revoked',
+] as const
 export type AuditType = (typeof AUDIT_TYPES)[number]
 
 /** URL scheme encoded in QR images. The app also accepts the bare code. */
@@ -29,6 +37,8 @@ export interface CreatorSummary {
   rootDirectoryId: string
   /** True when this is the signed-in user's own collection. */
   own: boolean
+  /** True when the signed-in user is an admin of at least one folder of this collection. */
+  admin: boolean
 }
 
 export interface VideoSummary {
@@ -39,6 +49,8 @@ export interface VideoSummary {
   status: VideoStatus
   durationSec: number | null
   createdAt: string
+  /** Set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video. */
+  canManage: boolean
 }
 
 export interface DirectoryNode {
@@ -51,8 +63,13 @@ export interface DirectoryNode {
 
 export interface LibraryTree {
   creator: CreatorSummary
-  /** Whether the viewer may manage items (owner). */
+  /** True for the owner, who also manages folders and admins. */
   canManage: boolean
+  /**
+   * Folders where the signed-in user is an admin. The user manages the videos, share codes and access of
+   * these folders and of every folder under them.
+   */
+  adminDirectoryIds: string[]
   root: DirectoryNode
 }
 
@@ -98,6 +115,37 @@ export interface AuditEventInfo {
   /** Folder name or video title, as the app shows it. A root folder shows as the creator's name. */
   targetName: string
   qrCodeId: string | null
+}
+
+export interface AdminInfo {
+  id: string
+  user: { id: string; name: string }
+  email: string | null
+  directoryId: string
+  createdAt: string
+}
+
+/** An upload link as its owner or an admin sees it. */
+export interface UploadLinkInfo {
+  id: string
+  code: string
+  /** Full link to send or to encode in a QR image. */
+  url: string
+  videoId: string
+  /** The last user who started an upload with the link. */
+  usedBy: { id: string; name: string } | null
+  usedAt: string | null
+  revokedAt: string | null
+  createdAt: string
+}
+
+/** What the person who opens an upload link sees. */
+export interface UploadLinkTarget {
+  videoId: string
+  videoTitle: string
+  creatorName: string
+  /** False when the video already has a file: the link no longer accepts uploads. */
+  open: boolean
 }
 
 export interface UploadTicket {

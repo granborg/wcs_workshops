@@ -10,8 +10,21 @@ import { QR_SCHEME } from '@/types'
  */
 export function installDeepLinks(router: Router): void {
   void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
-    if (url.startsWith(QR_SCHEME) || new URL(url).pathname.startsWith('/r/')) {
+    const code = uploadLinkCode(url)
+    if (code) {
+      void router.push({ name: 'upload-link', params: { code } })
+    } else if (url.startsWith(QR_SCHEME) || new URL(url).pathname.startsWith('/r/')) {
       void router.push({ name: 'scan', query: { code: url } })
     }
   })
+}
+
+/** The code of an upload link (https://<host>/up/<code>), or null for any other text. */
+export function uploadLinkCode(text: string): string | null {
+  try {
+    const match = /^\/up\/([^/]+)\/?$/.exec(new URL(text.trim()).pathname)
+    return match ? decodeURIComponent(match[1]!) : null
+  } catch {
+    return null
+  }
 }

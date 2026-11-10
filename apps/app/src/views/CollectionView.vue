@@ -9,16 +9,18 @@ import Skeleton from 'primevue/skeleton'
 import Tag from 'primevue/tag'
 import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
-import type { DirectoryNode, LibraryTree, VideoSummary } from '@/types'
+import type { DirectoryNode, LibraryTree, VideoStatus, VideoSummary } from '@/types'
 import { api, errorMessage, type ShareTarget } from '@/services/api'
 import { useDelayedFlag } from '@/composables/useDelayedFlag'
-import { findNode, pathTo } from '@/utils/tree'
+import { findNode, flatten, pathTo } from '@/utils/tree'
 import { formatDuration } from '@/utils/format'
 import TextPromptDialog from '@/components/TextPromptDialog.vue'
 import MoveDialog, { type MoveTarget } from '@/components/MoveDialog.vue'
 import DeleteDirectoryDialog from '@/components/DeleteDirectoryDialog.vue'
 import ShareDialog from '@/components/ShareDialog.vue'
 import AccessDialog from '@/components/AccessDialog.vue'
+import AdminsDialog from '@/components/AdminsDialog.vue'
+import UploadLinkDialog from '@/components/UploadLinkDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,7 +38,20 @@ const current = computed<DirectoryNode | null>(() =>
   tree.value && currentId.value ? findNode(tree.value.root, currentId.value) : null,
 )
 const crumbs = computed(() => (tree.value && currentId.value ? pathTo(tree.value.root, currentId.value) : []))
+// The owner manages everything, folders and admins included. An admin manages the videos, codes and access of
+// their folders and of every folder under them.
 const canManage = computed(() => tree.value?.canManage ?? false)
+const adminIds = computed(() => new Set(tree.value?.adminDirectoryIds ?? []))
+function managesDir(id: string) {
+  if (canManage.value) return true
+  if (!tree.value || adminIds.value.size === 0) return false
+  return pathTo(tree.value.root, id).some((n) => adminIds.value.has(n.id))
+}
+const canManageHere = computed(() => !!current.value && managesDir(current.value.id))
+// Folders a video can move to: all for the owner, only managed folders for an admin.
+const managedFolderIds = computed(() =>
+  tree.value ? new Set(flatten(tree.value.root).filter((d) => managesDir(d.id)).map((d) => d.id)) : new Set<string>(),
+)
 
 const crumbItems = computed<MenuItem[]>(() =>
   crumbs.value.map((c, i) => ({
@@ -76,10 +91,6 @@ function statusTag(v: VideoSummary): { label: string; severity: 'danger' | 'warn
   return { label: v.status === 'uploading' ? 'Uploading' : 'Processing', severity: 'warn' }
 }
 
-function plural(n: number, word: string) {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
-}
-
 /* ---------- creator actions ---------- */
 
 interface Selected {
@@ -87,10 +98,14 @@ interface Selected {
   id: string
   name: string
   directoryId: string
+  status?: VideoStatus
 }
 
+// A video with one of these statuses has no file yet, so an upload link can supply it.
+const NEEDS_FILE: VideoStatus[] = ['placeholder', 'uploading', 'failed']
+
 const selected = ref<Selected | null>(null)
-const dialog = ref<'share' | 'access' | 'rename' | 'move' | 'deleteDir' | 'newFolder' | null>(null)
+const dialog = ref<'share' | 'access' | 'rename' | 'move' | 'deleteDir' | 'newFolder' | 'admins' | 'uploadLink' | null>(null)
 const busy = ref(false)
 const menu = ref<InstanceType<typeof Menu> | null>(null)
 
@@ -101,19 +116,35 @@ const menuItems = computed<MenuItem[]>(() => {
     { label: 'Share (QR code)', icon: 'pi pi-qrcode', command: () => (dialog.value = 'share') },
     { label: 'View / edit access', icon: 'pi pi-users', command: () => (dialog.value = 'access') },
   ]
-  // The root folder is the collection itself: it cannot be renamed, moved or deleted.
-  if (s.kind === 'directory' && s.id === tree.value?.root.id) return items
-  items.push(
+  const change: MenuItem[] = [
     { label: 'Rename', icon: 'pi pi-pencil', command: () => (dialog.value = 'rename') },
     { label: 'Move', icon: 'pi pi-arrows-alt', command: () => (dialog.value = 'move') },
     { separator: true },
     { label: 'Delete', icon: 'pi pi-trash', class: 'menu-danger', command: () => askDelete() },
-  )
-  return items
+  ]
+  if (s.kind === 'video') {
+    if (s.status && NEEDS_FILE.includes(s.status)) {
+      items.push({ label: 'Upload link', icon: 'pi pi-cloud-upload', command: () => (dialog.value = 'uploadLink') })
+    }
+    return [...items, ...change]
+  }
+  // Folder changes and admins are for the owner only.
+  if (!canManage.value) return items
+  items.push({ label: 'Admins', icon: 'pi pi-user-edit', command: () => (dialog.value = 'admins') })
+  // The root folder is the collection itself: it cannot be renamed, moved or deleted.
+  if (s.id === tree.value?.root.id) return items
+  return [...items, ...change]
 })
 
-function openMenu(event: Event, kind: 'directory' | 'video', id: string, name: string, directoryId: string) {
-  selected.value = { kind, id, name, directoryId }
+function openMenu(
+  event: Event,
+  kind: 'directory' | 'video',
+  id: string,
+  name: string,
+  directoryId: string,
+  status?: VideoStatus,
+) {
+  selected.value = { kind, id, name, directoryId, status }
   menu.value?.toggle(event)
 }
 
@@ -201,14 +232,24 @@ function dirName(node: DirectoryNode) {
 
       <div class="page-head">
         <h2>{{ dirName(current) }}</h2>
-        <template v-if="canManage">
+        <Button
+          v-if="canManage"
+          label="New folder"
+          icon="pi pi-folder-plus"
+          severity="secondary"
+          outlined
+          size="small"
+          @click="dialog = 'newFolder'"
+        />
+        <template v-if="canManageHere">
           <Button
-            label="New folder"
-            icon="pi pi-folder-plus"
+            as="router-link"
+            :to="{ name: 'upload', query: { creator: creatorId, dir: current.id } }"
+            label="Add video"
+            icon="pi pi-upload"
             severity="secondary"
             outlined
             size="small"
-            @click="dialog = 'newFolder'"
           />
           <Button
             icon="pi pi-ellipsis-v"
@@ -221,15 +262,16 @@ function dirName(node: DirectoryNode) {
         </template>
       </div>
       <p v-if="canManage && crumbs.length <= 1" class="hint">You manage this collection.</p>
+      <p v-else-if="canManageHere && !canManage" class="hint">You are an admin of this folder.</p>
     </div>
 
     <div v-if="current.children.length === 0 && current.videos.length === 0" class="empty">
       <i class="pi pi-folder-open" aria-hidden="true" />
       <p>This folder is empty.</p>
       <Button
-        v-if="canManage"
+        v-if="canManageHere"
         as="router-link"
-        :to="{ name: 'upload', query: { dir: current.id } }"
+        :to="{ name: 'upload', query: { creator: creatorId, dir: current.id } }"
         label="Upload a video"
         icon="pi pi-upload"
       />
@@ -248,10 +290,9 @@ function dirName(node: DirectoryNode) {
         <span class="lead"><i class="pi pi-folder" aria-hidden="true" /></span>
         <div class="grow">
           <div class="title">{{ d.name }}</div>
-          <div class="sub">{{ plural(d.children.length, 'folder') }} · {{ plural(d.videos.length, 'video') }}</div>
         </div>
         <Button
-          v-if="canManage"
+          v-if="managesDir(d.id)"
           icon="pi pi-ellipsis-v"
           severity="secondary"
           text
@@ -280,13 +321,13 @@ function dirName(node: DirectoryNode) {
           </div>
         </div>
         <Button
-          v-if="canManage"
+          v-if="canManageHere"
           icon="pi pi-ellipsis-v"
           severity="secondary"
           text
           rounded
           aria-label="Options"
-          @click.stop="openMenu($event, 'video', v.id, v.title, v.directoryId)"
+          @click.stop="openMenu($event, 'video', v.id, v.title, v.directoryId, v.status)"
         />
       </li>
     </ul>
@@ -295,6 +336,19 @@ function dirName(node: DirectoryNode) {
     <Menu ref="menu" :model="menuItems" popup />
     <ShareDialog :open="dialog === 'share'" :target="shareTarget" :name="selected?.name ?? ''" @close="dialog = null" />
     <AccessDialog :open="dialog === 'access'" :target="shareTarget" :name="selected?.name ?? ''" @close="dialog = null" />
+    <AdminsDialog
+      :open="dialog === 'admins'"
+      :directory-id="selected?.kind === 'directory' ? selected.id : null"
+      :name="selected?.name ?? ''"
+      :is-root="selected?.id === tree.root.id"
+      @close="dialog = null"
+    />
+    <UploadLinkDialog
+      :open="dialog === 'uploadLink'"
+      :video-id="selected?.kind === 'video' ? selected.id : null"
+      :name="selected?.name ?? ''"
+      @close="dialog = null"
+    />
     <TextPromptDialog
       :open="dialog === 'rename'"
       title="Rename"
@@ -319,6 +373,7 @@ function dirName(node: DirectoryNode) {
       :target="moveTarget"
       :root="tree.root"
       :creator-name="tree.creator.name"
+      :allowed="canManage ? null : managedFolderIds"
       @close="dialog = null"
       @moved="afterChange"
     />

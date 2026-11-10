@@ -9,9 +9,11 @@ import (
 // AuditRow is one event derived from the grant and QR code tables. There is no audit table:
 // grants and codes carry their own timestamps and IPs.
 type AuditRow struct {
-	At          time.Time
-	Type        string // access.granted | access.revoked | qr.created | qr.revoked
-	SourceID    string // grant id or QR code id
+	At time.Time
+	// access.granted | access.revoked | qr.created | qr.revoked |
+	// upload_link.created | upload_link.used | upload_link.revoked
+	Type        string
+	SourceID    string // grant id, QR code id or upload link id
 	SubjectID   *string
 	IP          *string
 	DirectoryID *string
@@ -33,6 +35,15 @@ SELECT at, type, source_id, subject_id, ip, directory_id, video_id, qr_code_id F
     UNION ALL
     SELECT q.revoked_at, 'qr.revoked', q.id, NULL, NULL, q.directory_id, q.video_id, q.id
       FROM qr_codes q WHERE q.creator_id = ?1 AND q.revoked_at IS NOT NULL
+    UNION ALL
+    SELECT l.created_at, 'upload_link.created', l.id, NULL, l.created_ip, NULL, l.video_id, NULL
+      FROM upload_links l WHERE l.owner_id = ?1
+    UNION ALL
+    SELECT l.used_at, 'upload_link.used', l.id, l.used_by, l.used_ip, NULL, l.video_id, NULL
+      FROM upload_links l WHERE l.owner_id = ?1 AND l.used_at IS NOT NULL
+    UNION ALL
+    SELECT l.revoked_at, 'upload_link.revoked', l.id, NULL, NULL, NULL, l.video_id, NULL
+      FROM upload_links l WHERE l.owner_id = ?1 AND l.revoked_at IS NOT NULL
 )
 WHERE ?2 IS NULL OR at < ?2
 ORDER BY at DESC

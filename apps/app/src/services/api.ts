@@ -1,5 +1,6 @@
 import type {
   AccessGrantInfo,
+  AdminInfo,
   ApiError,
   AuditEventInfo,
   CreatorSummary,
@@ -9,6 +10,8 @@ import type {
   PlaybackInfo,
   QrCodeInfo,
   RedeemResult,
+  UploadLinkInfo,
+  UploadLinkTarget,
   UploadTicket,
   UserRole,
   VideoSummary,
@@ -100,6 +103,22 @@ export const api = {
   access: {
     list: (target: ShareTarget) => request<AccessGrantInfo[]>('GET', `/access${qs(target)}`),
     revoke: (id: string) => request<void>('DELETE', `/access/${id}`),
+  },
+  /** Collection admins. Only the owner lists, adds and removes them. */
+  admins: {
+    list: (directoryId: string) => request<AdminInfo[]>('GET', `/admins${qs({ directoryId })}`),
+    add: (directoryId: string, email: string) => request<AdminInfo>('POST', '/admins', { directoryId, email }),
+    remove: (id: string) => request<void>('DELETE', `/admins/${id}`),
+  },
+  uploadLinks: {
+    create: (videoId: string) => request<UploadLinkInfo>('POST', '/upload-links', { videoId }),
+    list: (videoId: string) => request<UploadLinkInfo[]>('GET', `/upload-links${qs({ videoId })}`),
+    revoke: (id: string) => request<UploadLinkInfo>('DELETE', `/upload-links/${id}`),
+    /** For the person who opened the link: any signed-in user. */
+    target: (code: string) => request<UploadLinkTarget>('GET', `/upload-links/code/${encodeURIComponent(code)}`),
+    ticket: (code: string, sizeBytes: number) =>
+      request<UploadTicket>('POST', `/upload-links/code/${encodeURIComponent(code)}/ticket`, { sizeBytes }),
+    complete: (code: string) => request<UploadLinkTarget>('POST', `/upload-links/code/${encodeURIComponent(code)}/complete`),
   },
   redeem: (code: string) => request<RedeemResult>('POST', '/redeem', { code }),
   audit: {

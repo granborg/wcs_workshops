@@ -20,7 +20,11 @@ func (s *Server) listAccess(w http.ResponseWriter, r *http.Request, u *model.Use
 	if err != nil {
 		return err
 	}
-	grants, err := s.st.ListActiveGrantsOn(r.Context(), u.ID, dirID, vidID)
+	ownerID, err := s.managedTarget(r.Context(), u, dirID, vidID)
+	if err != nil {
+		return err
+	}
+	grants, err := s.st.ListActiveGrantsOn(r.Context(), ownerID, dirID, vidID)
 	if err != nil {
 		return err
 	}
@@ -49,11 +53,14 @@ func (s *Server) revokeAccess(w http.ResponseWriter, r *http.Request, u *model.U
 		return httpx.NotFound("Access grant")
 	}
 	g, err := s.st.GetGrant(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && g.CreatorID != u.ID) {
+	if errors.Is(err, store.ErrNotFound) {
 		return httpx.NotFound("Access grant")
 	}
 	if err != nil {
 		return err
+	}
+	if _, err := s.managedTarget(r.Context(), u, g.DirectoryID, g.VideoID); err != nil {
+		return httpx.NotFound("Access grant")
 	}
 	if err := s.st.RevokeGrant(r.Context(), id, time.Now()); err != nil {
 		return err

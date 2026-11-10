@@ -82,7 +82,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request, u *model.User) e
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, model.RedeemResult{
-		Creator:     creatorSummary(creator, root.ID, u.ID),
+		Creator:     creatorSummary(creator, root.ID, u.ID, false),
 		DirectoryID: qr.DirectoryID,
 		VideoID:     qr.VideoID,
 		Added:       existing == nil,

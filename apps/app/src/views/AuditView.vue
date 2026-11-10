@@ -37,6 +37,9 @@ const ICONS: Record<AuditEventInfo['type'], string> = {
   'access.revoked': 'pi-user-minus',
   'qr.created': 'pi-qrcode',
   'qr.revoked': 'pi-ban',
+  'upload_link.created': 'pi-cloud-upload',
+  'upload_link.used': 'pi-upload',
+  'upload_link.revoked': 'pi-ban',
 }
 
 function describe(e: AuditEventInfo): string {
@@ -44,13 +47,22 @@ function describe(e: AuditEventInfo): string {
   const who = e.subject?.name ?? 'Someone'
   switch (e.type) {
     case 'access.granted':
-      return `${who} gained access to ${what} by scanning a QR code`
+      // A grant with no QR code comes from an upload link: the uploader may watch what they uploaded.
+      return e.qrCodeId
+        ? `${who} gained access to ${what} by scanning a QR code`
+        : `${who} gained access to ${what} by uploading it`
     case 'access.revoked':
       return `Access to ${what} was revoked for ${who}`
     case 'qr.created':
       return `QR code generated for ${what}`
     case 'qr.revoked':
       return `QR code revoked for ${what}`
+    case 'upload_link.created':
+      return `Upload link created for ${what}`
+    case 'upload_link.used':
+      return `${who} started an upload to ${what} with an upload link`
+    case 'upload_link.revoked':
+      return `Upload link revoked for ${what}`
   }
 }
 </script>

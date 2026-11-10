@@ -87,6 +87,17 @@ func (s *Server) routes() {
 	m.Handle("GET /api/access", a(s.listAccess))
 	m.Handle("DELETE /api/access/{id}", a(s.revokeAccess))
 
+	m.Handle("GET /api/admins", a(s.listAdmins))
+	m.Handle("POST /api/admins", a(s.addAdmin))
+	m.Handle("DELETE /api/admins/{id}", a(s.removeAdmin))
+
+	m.Handle("POST /api/upload-links", a(s.createUploadLink))
+	m.Handle("GET /api/upload-links", a(s.listUploadLinks))
+	m.Handle("DELETE /api/upload-links/{id}", a(s.revokeUploadLink))
+	m.Handle("GET /api/upload-links/code/{code}", a(s.getUploadLinkTarget))
+	m.Handle("POST /api/upload-links/code/{code}/ticket", a(s.uploadLinkTicket))
+	m.Handle("POST /api/upload-links/code/{code}/complete", a(s.uploadLinkComplete))
+
 	m.Handle("POST /api/redeem", a(s.redeem))
 	m.Handle("GET /api/audit", a(s.listAudit))
 
@@ -150,26 +161,28 @@ func clientIP(r *http.Request) *string {
 	return &ip
 }
 
-func creatorSummary(u *model.User, rootID, viewerID string) model.CreatorSummary {
-	return model.CreatorSummary{ID: u.ID, Name: u.Name, RootDirectoryID: rootID, Own: u.ID == viewerID}
+func creatorSummary(u *model.User, rootID, viewerID string, admin bool) model.CreatorSummary {
+	return model.CreatorSummary{ID: u.ID, Name: u.Name, RootDirectoryID: rootID, Own: u.ID == viewerID, Admin: admin}
 }
 
-// canView reports whether userID may play the video: owner, or an active grant on it or an ancestor.
-func (s *Server) canView(ctx context.Context, userID string, v *model.Video) (bool, error) {
-	if v.OwnerID == userID {
+// canView reports whether u may play the video: owner, admin of its folder or a folder above it,
+// or an active grant on it or on a folder above it.
+func (s *Server) canView(ctx context.Context, u *model.User, v *model.Video) (bool, error) {
+	if v.OwnerID == u.ID {
 		return true, nil
 	}
 	col, err := access.Load(ctx, s.st, v.OwnerID)
 	if err != nil || col == nil {
 		return false, err
 	}
-	dirs, vids, err := s.st.ActiveGrantRefs(ctx, userID, v.OwnerID)
+	grants, _, err := s.viewerGrants(ctx, u, v.OwnerID)
 	if err != nil {
 		return false, err
 	}
-	return col.VideoVisible(*v, access.NewGrants(dirs, vids)), nil
+	return col.VideoVisible(*v, grants), nil
 }
 
+// ownedDirectory returns the folder when u owns it. Folder changes and admins are for the owner only.
 func (s *Server) ownedDirectory(ctx context.Context, u *model.User, id string) (*model.Directory, error) {
 	if !isUUID(id) {
 		return nil, httpx.NotFound("Directory")
@@ -179,17 +192,6 @@ func (s *Server) ownedDirectory(ctx context.Context, u *model.User, id string) (
 		return nil, httpx.NotFound("Directory")
 	}
 	return d, err
-}
-
-func (s *Server) ownedVideo(ctx context.Context, u *model.User, id string) (*model.Video, error) {
-	if !isUUID(id) {
-		return nil, httpx.NotFound("Video")
-	}
-	v, err := s.st.GetVideo(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && v.OwnerID != u.ID) {
-		return nil, httpx.NotFound("Video")
-	}
-	return v, err
 }
 
 // vimeoErr maps client errors to HTTP errors.

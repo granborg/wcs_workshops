@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -39,15 +38,6 @@ func queryTarget(q url.Values) (*string, *string, error) {
 	return parseTarget(&d, &v)
 }
 
-func (s *Server) assertOwnedTarget(ctx context.Context, u *model.User, directoryID, videoID *string) error {
-	if directoryID != nil {
-		_, err := s.ownedDirectory(ctx, u, *directoryID)
-		return err
-	}
-	_, err := s.ownedVideo(ctx, u, *videoID)
-	return err
-}
-
 type createShareRequest struct {
 	DirectoryID *string `json:"directoryId"`
 	VideoID     *string `json:"videoId"`
@@ -76,7 +66,8 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err != nil {
 		return err
 	}
-	if err := s.assertOwnedTarget(ctx, u, dirID, vidID); err != nil {
+	ownerID, err := s.managedTarget(ctx, u, dirID, vidID)
+	if err != nil {
 		return err
 	}
 	var expires *time.Time
@@ -94,7 +85,8 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err != nil {
 		return err
 	}
-	qr, err := s.st.CreateQrCode(ctx, code, u.ID, dirID, vidID, clientIP(r), expires)
+	// The code belongs to the collection owner, also when an admin creates it.
+	qr, err := s.st.CreateQrCode(ctx, code, ownerID, dirID, vidID, clientIP(r), expires)
 	if err != nil {
 		return err
 	}
@@ -111,10 +103,11 @@ func (s *Server) listShare(w http.ResponseWriter, r *http.Request, u *model.User
 	if err != nil {
 		return err
 	}
-	if err := s.assertOwnedTarget(r.Context(), u, dirID, vidID); err != nil {
+	ownerID, err := s.managedTarget(r.Context(), u, dirID, vidID)
+	if err != nil {
 		return err
 	}
-	codes, err := s.st.ListQrCodes(r.Context(), u.ID, dirID, vidID)
+	codes, err := s.st.ListQrCodes(r.Context(), ownerID, dirID, vidID)
 	if err != nil {
 		return err
 	}
@@ -138,11 +131,14 @@ func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request, u *model.Us
 		return httpx.NotFound("QR code")
 	}
 	qr, err := s.st.GetQrCode(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && qr.CreatorID != u.ID) {
+	if errors.Is(err, store.ErrNotFound) {
 		return httpx.NotFound("QR code")
 	}
 	if err != nil {
 		return err
+	}
+	if _, err := s.managedTarget(ctx, u, qr.DirectoryID, qr.VideoID); err != nil {
+		return httpx.NotFound("QR code")
 	}
 	if qr.RevokedAt == nil {
 		if err := s.st.RevokeQrCode(ctx, id, time.Now()); err != nil {

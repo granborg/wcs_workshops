@@ -35,7 +35,7 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 	if req.SizeBytes <= 0 {
 		return httpx.BadRequest("sizeBytes must be positive")
 	}
-	dir, err := s.ownedDirectory(ctx, u, req.DirectoryID)
+	dir, err := s.managedDirectory(ctx, u, req.DirectoryID)
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,8 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 	if err != nil {
 		return vimeoErr(err)
 	}
-	v, err := s.st.CreateVideo(ctx, u.ID, dir.ID, *title, &created.VimeoID, created.Hash)
+	// The video belongs to the collection owner, also when an admin uploads it.
+	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, &created.VimeoID, created.Hash)
 	if err != nil {
 		return err
 	}
@@ -71,11 +72,11 @@ func (s *Server) createPlaceholder(w http.ResponseWriter, r *http.Request, u *mo
 	if err != nil {
 		return err
 	}
-	dir, err := s.ownedDirectory(ctx, u, req.DirectoryID)
+	dir, err := s.managedDirectory(ctx, u, req.DirectoryID)
 	if err != nil {
 		return err
 	}
-	v, err := s.st.CreateVideo(ctx, u.ID, dir.ID, *title, nil, nil)
+	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -102,27 +103,37 @@ func (s *Server) videoUploadTicket(w http.ResponseWriter, r *http.Request, u *mo
 	if req.SizeBytes <= 0 {
 		return httpx.BadRequest("sizeBytes must be positive")
 	}
-	v, err := s.ownedVideo(ctx, u, r.PathValue("id"))
+	v, err := s.managedVideo(ctx, u, r.PathValue("id"))
 	if err != nil {
 		return err
 	}
-	if v.Status == model.StatusProcessing || v.Status == model.StatusReady {
-		return httpx.BadRequest("This video already has a file")
-	}
-	created, err := s.vimeo.CreateTusUpload(ctx, v.Title, req.SizeBytes)
+	ticket, err := s.startUpload(ctx, v, req.SizeBytes)
 	if err != nil {
-		return vimeoErr(err)
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusCreated, ticket)
+	return nil
+}
+
+// startUpload reserves a new Vimeo upload for a video that has no file yet, and points the video at it.
+// A previous Vimeo video, if any, is deleted after the new one is reserved.
+func (s *Server) startUpload(ctx context.Context, v *model.Video, sizeBytes int64) (*model.UploadTicket, error) {
+	if v.HasFile() {
+		return nil, httpx.BadRequest("This video already has a file")
+	}
+	created, err := s.vimeo.CreateTusUpload(ctx, v.Title, sizeBytes)
+	if err != nil {
+		return nil, vimeoErr(err)
 	}
 	if _, err := s.st.AttachUpload(ctx, v.ID, created.VimeoID, created.Hash); err != nil {
-		return err
+		return nil, err
 	}
 	if v.VimeoID != nil {
 		if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil && !errors.Is(err, vimeo.ErrNotConfigured) {
 			s.log.Warn("vimeo delete of replaced upload failed", "video", v.ID, "err", err)
 		}
 	}
-	httpx.WriteJSON(w, http.StatusCreated, model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink})
-	return nil
+	return &model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink}, nil
 }
 
 // refreshStatus asks Vimeo for the transcode state and stores it. Vimeo errors leave the row unchanged.
@@ -158,20 +169,26 @@ func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Vide
 // completeVideo is step 2 of upload: the device finished sending bytes.
 func (s *Server) completeVideo(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	ctx := r.Context()
-	v, err := s.ownedVideo(ctx, u, r.PathValue("id"))
+	v, err := s.managedVideo(ctx, u, r.PathValue("id"))
 	if err != nil {
 		return err
 	}
-	if v.Status == model.StatusUploading {
-		if v, err = s.st.UpdateVideoStatus(ctx, v.ID, model.StatusProcessing, nil); err != nil {
-			return err
-		}
-	}
-	if v, err = s.refreshStatus(ctx, v); err != nil {
+	if v, err = s.markUploaded(ctx, v); err != nil {
 		return err
 	}
 	httpx.WriteJSON(w, http.StatusOK, v.ToSummary())
 	return nil
+}
+
+// markUploaded records that the device finished sending the file, then asks Vimeo for the status.
+func (s *Server) markUploaded(ctx context.Context, v *model.Video) (*model.Video, error) {
+	if v.Status == model.StatusUploading {
+		var err error
+		if v, err = s.st.UpdateVideoStatus(ctx, v.ID, model.StatusProcessing, nil); err != nil {
+			return nil, err
+		}
+	}
+	return s.refreshStatus(ctx, v)
 }
 
 func (s *Server) visibleVideo(ctx context.Context, u *model.User, id string) (*model.Video, error) {
@@ -185,7 +202,7 @@ func (s *Server) visibleVideo(ctx context.Context, u *model.User, id string) (*m
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.canView(ctx, u.ID, v)
+	ok, err := s.canView(ctx, u, v)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +223,11 @@ func (s *Server) getVideo(w http.ResponseWriter, r *http.Request, u *model.User)
 			return err
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, v.ToSummary())
+	out := v.ToSummary()
+	if out.CanManage, err = s.managesDir(ctx, u, v.OwnerID, v.DirectoryID); err != nil {
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -246,13 +267,18 @@ func (s *Server) patchVideo(w http.ResponseWriter, r *http.Request, u *model.Use
 	if err != nil {
 		return err
 	}
-	v, err := s.ownedVideo(ctx, u, r.PathValue("id"))
+	v, err := s.managedVideo(ctx, u, r.PathValue("id"))
 	if err != nil {
 		return err
 	}
 	if req.DirectoryID != nil {
-		if _, err := s.ownedDirectory(ctx, u, *req.DirectoryID); err != nil {
+		// Videos move only within their own collection.
+		target, err := s.managedDirectory(ctx, u, *req.DirectoryID)
+		if err != nil {
 			return err
+		}
+		if target.OwnerID != v.OwnerID {
+			return httpx.NotFound("Directory")
 		}
 	}
 	updated, err := s.st.UpdateVideo(ctx, v.ID, title, req.DirectoryID)
@@ -282,7 +308,7 @@ func (s *Server) deleteVideo(w http.ResponseWriter, r *http.Request, u *model.Us
 	if err := requireCreator(u); err != nil {
 		return err
 	}
-	v, err := s.ownedVideo(r.Context(), u, r.PathValue("id"))
+	v, err := s.managedVideo(r.Context(), u, r.PathValue("id"))
 	if err != nil {
 		return err
 	}

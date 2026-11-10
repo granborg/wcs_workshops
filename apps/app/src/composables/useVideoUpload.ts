@@ -8,6 +8,7 @@ export type UploadPhase = 'idle' | 'reserving' | 'uploading' | 'finishing' | 'do
 /**
  * Sends a file to Vimeo in three steps: get a ticket from the API, send the bytes with tus, then tell the API
  * the upload is complete. `getTicket` chooses between a new video and an existing one (a placeholder).
+ * `complete` defaults to the creator's endpoint; an upload link has its own.
  */
 export function useVideoUpload() {
   const phase = ref<UploadPhase>('idle')
@@ -15,7 +16,11 @@ export function useVideoUpload() {
   const busy = computed(() => phase.value !== 'idle' && phase.value !== 'done')
 
   /** Throws on failure and sets the phase back to idle. */
-  async function upload(file: File, getTicket: (sizeBytes: number) => Promise<UploadTicket>): Promise<VideoSummary> {
+  async function upload<T = VideoSummary>(
+    file: File,
+    getTicket: (sizeBytes: number) => Promise<UploadTicket>,
+    complete: (videoId: string) => Promise<T> = (id) => api.videos.complete(id) as Promise<T>,
+  ): Promise<T> {
     progress.value = 0
     phase.value = 'reserving'
     try {
@@ -34,9 +39,9 @@ export function useVideoUpload() {
         }).start()
       })
       phase.value = 'finishing'
-      const video = await api.videos.complete(ticket.videoId)
+      const result = await complete(ticket.videoId)
       phase.value = 'done'
-      return video
+      return result
     } catch (err) {
       phase.value = 'idle'
       throw err
