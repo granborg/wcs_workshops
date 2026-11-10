@@ -2,7 +2,7 @@
 # First deploy: see docs/DEPLOY.md.
 
 app = "wcs-workshops"
-primary_region = "iad"
+primary_region = "ord"
 
 [build]
   # Firebase web config (public). Fill in from Firebase console > Project settings > Your apps.
@@ -23,7 +23,7 @@ primary_region = "iad"
 # Secrets, set with `fly secrets set`: VIMEO_ACCESS_TOKEN, FIREBASE_CREDENTIALS_JSON
 
 [[mounts]]
-  source = "wcs_data"
+  source = "data"
   destination = "/data"
   initial_size = "1gb"
 

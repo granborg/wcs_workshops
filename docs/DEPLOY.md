@@ -10,7 +10,7 @@ the API from the same hostname, so browsers need no CORS and no second host.
 
    ```bash
    fly apps create wcs-workshops
-   fly volumes create wcs_data --region iad --size 1
+   fly volumes create data --region ord --size 1
    ```
 
    If you choose another app name or region, change `app` and `primary_region` in `fly.toml`.
@@ -54,7 +54,7 @@ npm run build -w apps/app && npm run cap:sync
 - **Logs:** `fly logs`.
 - **Scale:** keep `min_machines_running = 1` and never more than one machine. SQLite has one writer. The
   smallest shared machine is enough; the API moves metadata only, video bytes go straight to Vimeo.
-- **Backups:** `fly volumes snapshots list wcs_data` shows daily snapshots Fly keeps for five days. For
+- **Backups:** `fly volumes snapshots list <volume-id>` shows daily snapshots Fly keeps for five days. For
   point-in-time restore, add Litestream later: run it as a second process in the image and stream the file to
   Tigris (Fly's object storage) or Backblaze B2.
 - **Custom domain:** `fly certs add workshops.example.com`, then add the DNS records it prints and add the
