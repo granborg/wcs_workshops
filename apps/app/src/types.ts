@@ -48,6 +48,10 @@ export interface VideoSummary {
   directoryId: string
   status: VideoStatus
   durationSec: number | null
+  /** Frame size in pixels and a thumbnail link, null until Vimeo has processed the video. */
+  width: number | null
+  height: number | null
+  thumbnailUrl: string | null
   createdAt: string
   /** Set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video. */
   canManage: boolean

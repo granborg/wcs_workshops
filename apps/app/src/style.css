@@ -279,6 +279,19 @@ main.page {
   color: var(--p-primary-300);
 }
 
+/* Video thumbnail in place of the icon. Wider than the icon box; a portrait frame is cropped to fit. */
+.row .lead.thumb {
+  width: 64px;
+  overflow: hidden;
+  background: #000;
+}
+
+.row .lead.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .row .trail {
   color: var(--p-text-muted-color);
   padding-right: 8px;
@@ -393,9 +406,11 @@ a.p-button {
   border: 1px solid var(--p-content-border-color);
 }
 
+/* The view sets aspect-ratio and, for a portrait video, max-width inline. */
 .player {
   position: relative;
   width: 100%;
+  margin: 0 auto;
   aspect-ratio: 16 / 9;
   background: #000;
   border-radius: var(--radius);

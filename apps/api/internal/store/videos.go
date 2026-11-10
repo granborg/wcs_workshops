@@ -8,19 +8,23 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
 )
 
-const videoCols = `id, owner_id, directory_id, title, vimeo_id, vimeo_hash, status, duration_sec, created_at, updated_at`
+const videoCols = `id, owner_id, directory_id, title, vimeo_id, vimeo_hash, status, duration_sec, width, height, thumbnail_url, created_at, updated_at`
 
 func scanVideo(r scanner) (*model.Video, error) {
 	var v model.Video
-	var vimeoID, vimeoHash sql.NullString
-	var duration sql.NullInt64
+	var vimeoID, vimeoHash, thumb sql.NullString
+	var duration, width, height sql.NullInt64
 	var created, updated int64
-	if err := r.Scan(&v.ID, &v.OwnerID, &v.DirectoryID, &v.Title, &vimeoID, &vimeoHash, &v.Status, &duration, &created, &updated); err != nil {
+	if err := r.Scan(&v.ID, &v.OwnerID, &v.DirectoryID, &v.Title, &vimeoID, &vimeoHash, &v.Status, &duration,
+		&width, &height, &thumb, &created, &updated); err != nil {
 		return nil, err
 	}
 	v.VimeoID = ptrStr(vimeoID)
 	v.VimeoHash = ptrStr(vimeoHash)
 	v.DurationSec = ptrInt(duration)
+	v.Width = ptrInt(width)
+	v.Height = ptrInt(height)
+	v.ThumbnailURL = ptrStr(thumb)
 	v.CreatedAt = fromMs(created)
 	v.UpdatedAt = fromMs(updated)
 	return &v, nil
@@ -57,7 +61,7 @@ func (s *Store) CreateVideo(ctx context.Context, ownerID, directoryID, title str
 		ID: newID(), OwnerID: ownerID, DirectoryID: directoryID, Title: title,
 		VimeoID: vimeoID, VimeoHash: vimeoHash, Status: status, CreatedAt: t, UpdatedAt: t,
 	}
-	err := s.exec(ctx, `INSERT INTO videos (`+videoCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+	err := s.exec(ctx, `INSERT INTO videos (`+videoCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
 		v.ID, v.OwnerID, v.DirectoryID, v.Title, nullStr(v.VimeoID), nullStr(v.VimeoHash), v.Status, toMs(t), toMs(t))
 	return v, err
 }
@@ -81,14 +85,27 @@ func (s *Store) UpdateVideo(ctx context.Context, id string, title, directoryID *
 	return s.GetVideo(ctx, id)
 }
 
-func (s *Store) UpdateVideoStatus(ctx context.Context, id, status string, durationSec *int) (*model.Video, error) {
-	var dur any
-	if durationSec != nil {
-		dur = *durationSec
+// VideoMeta is what Vimeo reports about the uploaded file. Nil fields keep the stored value.
+type VideoMeta struct {
+	DurationSec  *int
+	Width        *int
+	Height       *int
+	ThumbnailURL *string
+}
+
+func nullInt(n *int) any {
+	if n == nil {
+		return nil
 	}
+	return *n
+}
+
+func (s *Store) UpdateVideoStatus(ctx context.Context, id, status string, meta VideoMeta) (*model.Video, error) {
 	if err := s.exec(ctx,
-		`UPDATE videos SET status = ?, duration_sec = COALESCE(?, duration_sec), updated_at = ? WHERE id = ?`,
-		status, dur, toMs(now()), id); err != nil {
+		`UPDATE videos SET status = ?, duration_sec = COALESCE(?, duration_sec), width = COALESCE(?, width),
+		 height = COALESCE(?, height), thumbnail_url = COALESCE(?, thumbnail_url), updated_at = ? WHERE id = ?`,
+		status, nullInt(meta.DurationSec), nullInt(meta.Width), nullInt(meta.Height), nullStr(meta.ThumbnailURL),
+		toMs(now()), id); err != nil {
 		return nil, err
 	}
 	return s.GetVideo(ctx, id)
@@ -97,7 +114,8 @@ func (s *Store) UpdateVideoStatus(ctx context.Context, id, status string, durati
 // AttachUpload points an existing video at a new Vimeo upload and resets its status to uploading.
 func (s *Store) AttachUpload(ctx context.Context, id, vimeoID string, vimeoHash *string) (*model.Video, error) {
 	if err := s.exec(ctx,
-		`UPDATE videos SET vimeo_id = ?, vimeo_hash = ?, status = ?, duration_sec = NULL, updated_at = ? WHERE id = ?`,
+		`UPDATE videos SET vimeo_id = ?, vimeo_hash = ?, status = ?, duration_sec = NULL, width = NULL, height = NULL,
+		 thumbnail_url = NULL, updated_at = ? WHERE id = ?`,
 		vimeoID, nullStr(vimeoHash), model.StatusUploading, toMs(now()), id); err != nil {
 		return nil, err
 	}

@@ -46,7 +46,7 @@ func TestPlaceholderMigrationKeepsReferences(t *testing.T) {
 			t.Errorf("%s rows = %d, want %d", table, n, want)
 		}
 	}
-	if _, err := d.Exec(`INSERT INTO videos VALUES ('v2', 'u1', 'd1', 'Later', NULL, NULL, 'placeholder', NULL, 0, 0)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO videos (id, owner_id, directory_id, title, vimeo_id, vimeo_hash, status, duration_sec, created_at, updated_at) VALUES ('v2', 'u1', 'd1', 'Later', NULL, NULL, 'placeholder', NULL, 0, 0)`); err != nil {
 		t.Errorf("placeholder status rejected: %v", err)
 	}
 

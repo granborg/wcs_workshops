@@ -48,8 +48,19 @@ type Video struct {
 	Name     string  `json:"name"`
 	Link     string  `json:"link"`
 	Duration float64 `json:"duration"`
+	Width    int     `json:"width"`
+	Height   int     `json:"height"`
 	Status   string  `json:"status"`
-	Upload   *struct {
+	Pictures *struct {
+		// Type is "default" while Vimeo still serves its generic placeholder picture.
+		Type  string `json:"type"`
+		Sizes []struct {
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			Link   string `json:"link"`
+		} `json:"sizes"`
+	} `json:"pictures"`
+	Upload *struct {
 		Approach   string `json:"approach"`
 		UploadLink string `json:"upload_link"`
 		Status     string `json:"status"`
@@ -140,11 +151,31 @@ func (c *Client) CreateTusUpload(ctx context.Context, name string, sizeBytes int
 func (c *Client) GetVideo(ctx context.Context, vimeoID string) (*Video, error) {
 	var v Video
 	err := c.do(ctx, http.MethodGet,
-		"/videos/"+url.PathEscape(vimeoID)+"?fields=uri,name,link,duration,status,upload.status,transcode.status", nil, &v)
+		"/videos/"+url.PathEscape(vimeoID)+
+			"?fields=uri,name,link,duration,width,height,status,upload.status,transcode.status,pictures.type,pictures.sizes",
+		nil, &v)
 	if err != nil {
 		return nil, err
 	}
 	return &v, nil
+}
+
+// Thumbnail picks a list-sized picture link: the smallest one at least 400px wide, else the largest.
+// Nil while Vimeo still serves its placeholder picture or has no picture yet.
+func (v *Video) Thumbnail() *string {
+	if v.Pictures == nil || v.Pictures.Type == "default" || len(v.Pictures.Sizes) == 0 {
+		return nil
+	}
+	best := v.Pictures.Sizes[0]
+	for _, s := range v.Pictures.Sizes[1:] {
+		if s.Width >= 400 && (best.Width < 400 || s.Width < best.Width) || best.Width < 400 && s.Width > best.Width {
+			best = s
+		}
+	}
+	if best.Link == "" {
+		return nil
+	}
+	return &best.Link
 }
 
 // Rename changes the title on Vimeo.

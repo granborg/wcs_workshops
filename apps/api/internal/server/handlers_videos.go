@@ -136,9 +136,19 @@ func (s *Server) startUpload(ctx context.Context, v *model.Video, sizeBytes int6
 	return &model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink}, nil
 }
 
-// refreshStatus asks Vimeo for the transcode state and stores it. Vimeo errors leave the row unchanged.
+// needsRefresh is true while Vimeo may still have news: the video is uploading or processing, or it is ready
+// but Vimeo had not generated its thumbnail yet when the status was last checked.
+func needsRefresh(v *model.Video) bool {
+	if v.VimeoID == nil || v.Status == model.StatusFailed || v.Status == model.StatusPlaceholder {
+		return false
+	}
+	return v.Status != model.StatusReady || v.ThumbnailURL == nil
+}
+
+// refreshStatus asks Vimeo for the transcode state, frame size and thumbnail and stores them.
+// Vimeo errors leave the row unchanged.
 func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Video, error) {
-	if v.VimeoID == nil || v.Status == model.StatusReady || v.Status == model.StatusFailed {
+	if !needsRefresh(v) {
 		return v, nil
 	}
 	remote, err := s.vimeo.GetVideo(ctx, *v.VimeoID)
@@ -158,12 +168,19 @@ func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Vide
 	case remote.Upload != nil && remote.Upload.Status == "complete":
 		status = model.StatusProcessing
 	}
-	var dur *int
+	var meta store.VideoMeta
 	if remote.Duration > 0 {
 		d := int(math.Round(remote.Duration))
-		dur = &d
+		meta.DurationSec = &d
 	}
-	return s.st.UpdateVideoStatus(ctx, v.ID, status, dur)
+	if remote.Width > 0 && remote.Height > 0 {
+		meta.Width, meta.Height = &remote.Width, &remote.Height
+	}
+	// Before the transcode is complete, Vimeo's picture is a placeholder. Do not keep that one.
+	if status == model.StatusReady {
+		meta.ThumbnailURL = remote.Thumbnail()
+	}
+	return s.st.UpdateVideoStatus(ctx, v.ID, status, meta)
 }
 
 // completeVideo is step 2 of upload: the device finished sending bytes.
@@ -184,7 +201,7 @@ func (s *Server) completeVideo(w http.ResponseWriter, r *http.Request, u *model.
 func (s *Server) markUploaded(ctx context.Context, v *model.Video) (*model.Video, error) {
 	if v.Status == model.StatusUploading {
 		var err error
-		if v, err = s.st.UpdateVideoStatus(ctx, v.ID, model.StatusProcessing, nil); err != nil {
+		if v, err = s.st.UpdateVideoStatus(ctx, v.ID, model.StatusProcessing, store.VideoMeta{}); err != nil {
 			return nil, err
 		}
 	}
@@ -218,7 +235,8 @@ func (s *Server) getVideo(w http.ResponseWriter, r *http.Request, u *model.User)
 	if err != nil {
 		return err
 	}
-	if v.Status == model.StatusProcessing {
+	// Uploading videos are refreshed by the completion call, not here: the device may still be sending bytes.
+	if v.Status == model.StatusProcessing || v.Status == model.StatusReady {
 		if v, err = s.refreshStatus(ctx, v); err != nil {
 			return err
 		}

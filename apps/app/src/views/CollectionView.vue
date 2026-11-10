@@ -295,7 +295,10 @@ function dirName(node: DirectoryNode) {
         @click="openVideo(v)"
         @keydown.enter="openVideo(v)"
       >
-        <span class="lead"><i class="pi pi-video" aria-hidden="true" /></span>
+        <span class="lead" :class="{ thumb: v.thumbnailUrl }">
+          <img v-if="v.thumbnailUrl" :src="v.thumbnailUrl" alt="" loading="lazy" />
+          <i v-else class="pi pi-video" aria-hidden="true" />
+        </span>
         <div class="grow">
           <div class="title">{{ v.title }}</div>
           <div class="sub">

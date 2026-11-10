@@ -69,8 +69,12 @@ type Video struct {
 	VimeoHash   *string
 	Status      string
 	DurationSec *int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Width, Height and ThumbnailURL come from Vimeo once the video is processed. Nil until then.
+	Width        *int
+	Height       *int
+	ThumbnailURL *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type QrCode struct {
@@ -148,7 +152,11 @@ type VideoSummary struct {
 	DirectoryID string `json:"directoryId"`
 	Status      string `json:"status"`
 	DurationSec *int   `json:"durationSec"`
-	CreatedAt   string `json:"createdAt"`
+	// Frame size in pixels and a thumbnail link, null until Vimeo has processed the video.
+	Width        *int    `json:"width"`
+	Height       *int    `json:"height"`
+	ThumbnailURL *string `json:"thumbnailUrl"`
+	CreatedAt    string  `json:"createdAt"`
 	// CanManage is set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video.
 	CanManage bool `json:"canManage"`
 }
@@ -274,8 +282,11 @@ func (v Video) ToSummary() VideoSummary {
 		Title:       v.Title,
 		DirectoryID: v.DirectoryID,
 		Status:      v.Status,
-		DurationSec: v.DurationSec,
-		CreatedAt:   ISO(v.CreatedAt),
+		DurationSec:  v.DurationSec,
+		Width:        v.Width,
+		Height:       v.Height,
+		ThumbnailURL: v.ThumbnailURL,
+		CreatedAt:    ISO(v.CreatedAt),
 	}
 }
 
