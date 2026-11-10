@@ -8,7 +8,7 @@ defineProps<{ phase: UploadPhase; progress: number }>()
 
 <template>
   <div class="field">
-    <ProgressBar :value="progress" :mode="phase === 'uploading' ? 'determinate' : 'indeterminate'" style="height: 10px" />
+    <ProgressBar :value="progress" :show-value="false" :mode="phase === 'uploading' ? 'determinate' : 'indeterminate'" style="height: 10px" />
     <span class="hint">
       <template v-if="phase === 'reserving'">Preparing upload…</template>
       <template v-else-if="phase === 'uploading'">Uploading {{ progress }}%</template>
