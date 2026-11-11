@@ -2,15 +2,17 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import type { CreatorSummary, LibraryTree } from '@/types'
-import { api, errorMessage } from '@/services/api'
+import { api, errorMessage, type NewVideo } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useVideoUpload } from '@/composables/useVideoUpload'
-import { flatten, pathTo } from '@/utils/tree'
+import { folderPaths, pathTo } from '@/utils/tree'
+import { toDateOnly } from '@/utils/format'
 import FolderSelect from '@/components/FolderSelect.vue'
 import UploadProgress from '@/components/UploadProgress.vue'
 import VideoFilePicker from '@/components/VideoFilePicker.vue'
@@ -34,6 +36,8 @@ const creatorId = ref(typeof route.query.creator === 'string' ? route.query.crea
 const tree = ref<LibraryTree | null>(null)
 const file = ref<File | null>(null)
 const title = ref('')
+// The date of the video, for example the day of the workshop. Today by default; the creator can change or clear it.
+const videoDate = ref<Date | null>(new Date())
 const directoryId = ref(typeof route.query.dir === 'string' ? route.query.dir : '')
 const creating = ref(false)
 const error = ref<string | null>(null)
@@ -44,10 +48,9 @@ const folders = computed(() => {
   if (!t) return []
   const adminIds = new Set(t.adminDirectoryIds)
   const manages = (id: string) => t.canManage || pathTo(t.root, id).some((n) => adminIds.has(n.id))
-  return flatten(t.root).map((d) => ({
+  return folderPaths(t.root, t.creator.name).map((d) => ({
     id: d.id,
-    depth: d.depth,
-    label: d.depth === 0 ? t.creator.name : d.name,
+    label: d.path,
     disabled: !manages(d.id),
   }))
 })
@@ -90,13 +93,17 @@ watch(file, (f) => {
 async function start() {
   if (!canSubmit.value) return
   error.value = null
+  const video: NewVideo = {
+    title: title.value.trim(),
+    directoryId: directoryId.value,
+    videoDate: videoDate.value ? toDateOnly(videoDate.value) : undefined,
+  }
   try {
     if (mode.value === 'later') {
       creating.value = true
-      await api.videos.placeholder(title.value.trim(), directoryId.value)
+      await api.videos.placeholder(video)
     } else {
-      const t = title.value.trim()
-      await upload(file.value!, (size) => api.videos.ticket(t, directoryId.value, size))
+      await upload(file.value!, (size) => api.videos.ticket(video, size))
     }
     await router.push({ name: 'collection', params: { creatorId: creatorId.value }, query: { dir: directoryId.value } })
   } catch (err) {
@@ -133,6 +140,20 @@ async function start() {
     <div class="field">
       <label for="title">Title</label>
       <InputText id="title" v-model="title" :disabled="busy" maxlength="120" fluid />
+    </div>
+
+    <div class="field">
+      <label for="video-date">Date</label>
+      <DatePicker
+        v-model="videoDate"
+        input-id="video-date"
+        :disabled="busy"
+        show-icon
+        icon-display="input"
+        show-button-bar
+        fluid
+      />
+      <span class="hint">For example, the day of the workshop. You can sort videos by this date.</span>
     </div>
 
     <div v-if="collections.length > 1" class="field">

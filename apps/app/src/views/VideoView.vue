@@ -30,20 +30,14 @@ const file = ref<File | null>(null)
 const uploadError = ref<string | null>(null)
 const showLinkDialog = ref(false)
 const canManage = computed(() => video.value?.canManage ?? false)
+// Width divided by height, so the player has the shape of the video. Portrait videos are taller than wide.
+const aspect = computed(() => {
+  const v = video.value
+  return v?.width && v.height ? v.width / v.height : 16 / 9
+})
 const canUpload = computed(
   () => canManage.value && (uploading.value || ['placeholder', 'uploading', 'failed'].includes(video.value!.status)),
 )
-
-// Size the player frame to the video, so a portrait video is not letterboxed in a 16:9 frame.
-// A portrait frame is capped at 70% of the viewport height and centered. 16:9 until Vimeo reports the size.
-const playerStyle = computed(() => {
-  const w = video.value?.width ?? 16
-  const h = video.value?.height ?? 9
-  return {
-    aspectRatio: `${w} / ${h}`,
-    maxWidth: h > w ? `calc(70vh * ${w} / ${h})` : undefined,
-  }
-})
 
 async function load() {
   if (poll) clearTimeout(poll)
@@ -91,7 +85,7 @@ onBeforeUnmount(() => {
 
   <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
-  <div v-if="playback" class="player" :style="playerStyle">
+  <div v-if="playback" class="player" :style="{ '--ar': aspect }">
     <iframe
       :src="playback.embedUrl"
       :title="video?.title ?? 'Video'"
@@ -99,7 +93,7 @@ onBeforeUnmount(() => {
       allowfullscreen
     />
   </div>
-  <Skeleton v-else-if="slow" width="100%" :style="{ ...playerStyle, height: 'auto' }" border-radius="10px" />
+  <Skeleton v-else-if="slow" width="100%" style="aspect-ratio: 16 / 9; height: auto" border-radius="10px" />
 
   <div v-if="video?.status === 'placeholder' && !canManage" class="empty">
     <i class="pi pi-clock" aria-hidden="true" />

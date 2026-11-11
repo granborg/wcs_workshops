@@ -92,3 +92,26 @@ func (s *Server) patchMe(w http.ResponseWriter, r *http.Request, u *model.User) 
 	httpx.WriteJSON(w, http.StatusOK, me)
 	return nil
 }
+
+// deleteMe deletes the signed-in user's account: the database row (with everything that cascades from it) and
+// the Firebase sign-in account. A creator must delete every video in their collection first, because videos
+// also live on Vimeo.
+func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	ctx := r.Context()
+	deleted, err := s.st.DeleteUserWithoutVideos(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return httpx.Conflict("Delete every video in your collection before you delete your account")
+	}
+	// The data is gone. If the sign-in account stays, the next sign-in makes a new, empty account; the user can
+	// delete again to retry.
+	if err := s.verifier.DeleteUser(ctx, u.AuthUID); err != nil {
+		s.log.Error("delete sign-in account failed", "user", u.ID, "err", err)
+		return httpx.NewError(http.StatusBadGateway, "auth_delete_failed",
+			"Your data is deleted, but the sign-in account was not removed. Try again.")
+	}
+	httpx.WriteJSON(w, http.StatusNoContent, nil)
+	return nil
+}

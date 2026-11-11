@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/granborg/wcs_workshops/apps/api/internal/access"
 	"github.com/granborg/wcs_workshops/apps/api/internal/httpx"
@@ -82,6 +85,7 @@ func (s *Server) getLibraryTree(w http.ResponseWriter, r *http.Request, u *model
 	if col == nil {
 		return httpx.NotFound("Creator")
 	}
+	s.refreshFromVimeo(ctx, col.Videos)
 
 	own := creator.ID == u.ID
 	var grants *access.Grants
@@ -104,4 +108,33 @@ func (s *Server) getLibraryTree(w http.ResponseWriter, r *http.Request, u *model
 		Root:              col.BuildTree(grants),
 	})
 	return nil
+}
+
+// refreshFromVimeo asks Vimeo about each video that is still processing, or that has no size or thumbnail yet
+// (see wantsRefresh), and updates videos in place. Without this, the folder list shows "Processing" until
+// someone opens the video. A slow or failing Vimeo leaves the stored values; a later load tries again.
+func (s *Server) refreshFromVimeo(ctx context.Context, videos []model.Video) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 4) // at most 4 Vimeo requests at a time
+	for i := range videos {
+		v := &videos[i]
+		if !wantsRefresh(v) {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			updated, err := s.refreshStatus(ctx, v)
+			if err != nil {
+				s.log.Warn("refresh video status failed", "video", v.ID, "err", err)
+				return
+			}
+			*v = *updated
+		}()
+	}
+	wg.Wait()
 }

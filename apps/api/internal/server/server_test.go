@@ -6,13 +6,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/granborg/wcs_workshops/apps/api/internal/auth"
@@ -26,9 +29,12 @@ import (
 // Tokens are verified by a fake: the bearer token is the user's email address.
 // Vimeo is not configured, so upload endpoints are expected to answer 503.
 
-type fakeVerifier struct{}
+type fakeVerifier struct {
+	mu      sync.Mutex
+	deleted []string // auth uids passed to DeleteUser
+}
 
-func (fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, error) {
+func (*fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, error) {
 	if !strings.Contains(token, "@") {
 		return auth.Identity{}, errors.New("bad token")
 	}
@@ -36,13 +42,86 @@ func (fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, erro
 	return auth.Identity{AuthUID: "fake:" + email, Email: &email, Name: strings.SplitN(email, "@", 2)[0]}, nil
 }
 
+func (f *fakeVerifier) DeleteUser(_ context.Context, authUID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, authUID)
+	return nil
+}
+
 type client struct {
 	t    *testing.T
 	base string
 	db   *sql.DB // for the few states the HTTP API cannot reach without Vimeo
+	auth *fakeVerifier
 }
 
 func newClient(t *testing.T) client {
+	t.Helper()
+	return newClientWith(t, nil)
+}
+
+// fakeVimeo answers the Vimeo API calls the server makes. Uploads start "in_progress"; a test sets them
+// "complete" or "error" with setUpload.
+type fakeVimeo struct {
+	mu      sync.Mutex
+	next    int
+	uploads map[string]string // Vimeo id -> upload status
+	deleted []string
+}
+
+func (f *fakeVimeo) setUpload(id, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploads[id] = status
+}
+
+func (f *fakeVimeo) wasDeleted(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.deleted, id)
+}
+
+func (f *fakeVimeo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	switch {
+	case r.Method == "POST" && r.URL.Path == "/me/videos":
+		f.next++
+		id := fmt.Sprint(1000 + f.next)
+		f.uploads[id] = "in_progress"
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"uri":"/videos/%s","link":"https://vimeo.com/%s/hash","upload":{"upload_link":"https://tus.example/%s"}}`, id, id, id)
+	case r.Method == "GET" && len(parts) == 2 && parts[0] == "videos":
+		status, ok := f.uploads[parts[1]]
+		if !ok {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		fmt.Fprintf(w, `{"uri":"/videos/%s","upload":{"status":%q},"transcode":{"status":"in_progress"}}`, parts[1], status)
+	case r.Method == "DELETE" && len(parts) == 2 && parts[0] == "videos":
+		f.deleted = append(f.deleted, parts[1])
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// newClientWithVimeo is newClient with a fake Vimeo, for the upload flows.
+func newClientWithVimeo(t *testing.T) (client, *fakeVimeo) {
+	t.Helper()
+	fv := &fakeVimeo{uploads: map[string]string{}}
+	vs := httptest.NewServer(fv)
+	t.Cleanup(vs.Close)
+	return newClientWith(t, func(cfg *config.Config) {
+		cfg.VimeoAPIURL = vs.URL
+		cfg.VimeoAccessToken = "test-token"
+	}), fv
+}
+
+func newClientWith(t *testing.T, configure func(*config.Config)) client {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -53,10 +132,14 @@ func newClient(t *testing.T) client {
 		t.Fatalf("migrate: %v", err)
 	}
 	cfg := config.Config{VimeoPrivacy: "unlisted", CORSOrigins: []string{"http://localhost:5173"}}
-	srv := New(cfg, database, fakeVerifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if configure != nil {
+		configure(&cfg)
+	}
+	verifier := &fakeVerifier{}
+	srv := New(cfg, database, verifier, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return client{t: t, base: ts.URL, db: database}
+	return client{t: t, base: ts.URL, db: database, auth: verifier}
 }
 
 func (c client) do(user, method, path string, body, out any) (int, string) {
@@ -175,12 +258,89 @@ func TestPlaceholder(t *testing.T) {
 	}
 	c.expect(400, viewer, "GET", "/videos/"+v.ID+"/playback", nil)
 	c.expect(403, viewer, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
+	// Only the owner and admins can download, and only a video that has a file.
+	c.expect(404, viewer, "GET", "/videos/"+v.ID+"/downloads", nil)
+	c.expect(400, creator, "GET", "/videos/"+v.ID+"/downloads", nil)
 
 	c.expect(400, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 0})
 	c.expect(503, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
 	c.must(creator, "GET", "/videos/"+v.ID, nil, &seen)
 	if seen.Status != model.StatusPlaceholder {
 		t.Fatalf("failed ticket changed status to %q", seen.Status)
+	}
+}
+
+// A video has an optional date. The creator sets it on create and changes or clears it later.
+func TestVideoDate(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+
+	c.expect(400, creator, "POST", "/videos/placeholder", anyMap{"title": "Bad", "directoryId": f.root, "videoDate": "2026-02-30"})
+	c.expect(400, creator, "POST", "/videos/placeholder", anyMap{"title": "Bad", "directoryId": f.root, "videoDate": ""})
+
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Dated", "directoryId": f.root, "videoDate": "2026-03-14"}, &v)
+	if v.VideoDate == nil || *v.VideoDate != "2026-03-14" {
+		t.Fatalf("videoDate = %v", v.VideoDate)
+	}
+	var undated model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Undated", "directoryId": f.root}, &undated)
+	if undated.VideoDate != nil {
+		t.Fatalf("videoDate = %q, want null", *undated.VideoDate)
+	}
+
+	c.expect(400, creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "14/03/2026"})
+	c.must(creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "2025-12-31"}, &v)
+	if v.VideoDate == nil || *v.VideoDate != "2025-12-31" || v.Title != "Dated" {
+		t.Fatalf("after patch: %+v", v)
+	}
+	c.must(creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": ""}, &v)
+	if v.VideoDate != nil {
+		t.Fatalf("after clear: videoDate = %q", *v.VideoDate)
+	}
+	c.expect(403, viewer, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "2025-12-31"})
+}
+
+// A user can delete their account. A creator must delete their videos first.
+func TestDeleteAccount(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Keep", "directoryId": f.week.ID}, &v)
+	var qr model.QrCodeInfo
+	c.must(creator, "POST", "/share", anyMap{"directoryId": f.season.ID}, &qr)
+	c.must(viewer, "POST", "/redeem", anyMap{"code": qr.Code}, nil)
+
+	c.expect(409, creator, "DELETE", "/me", nil)
+	if len(c.auth.deleted) != 0 {
+		t.Fatalf("sign-in account deleted while videos remain: %v", c.auth.deleted)
+	}
+	c.must(creator, "GET", "/library/"+f.me.ID, nil, nil) // nothing was removed
+
+	// A viewer can always delete. Their access grants go with them; the creator's collection stays.
+	c.expect(204, viewer, "DELETE", "/me", nil)
+	var grants int
+	if err := c.db.QueryRow(`SELECT COUNT(*) FROM access_grants`).Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if grants != 0 {
+		t.Fatalf("%d access grants left after the viewer was deleted", grants)
+	}
+
+	c.must(creator, "DELETE", "/videos/"+v.ID, nil, nil)
+	c.expect(204, creator, "DELETE", "/me", nil)
+	if !slices.Equal(c.auth.deleted, []string{"fake:" + viewer, "fake:" + creator}) {
+		t.Fatalf("deleted sign-in accounts = %v", c.auth.deleted)
+	}
+	for _, table := range []string{"users", "directories", "qr_codes"} {
+		var n int
+		if err := c.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("%d rows left in %s", n, table)
+		}
 	}
 }
 
@@ -287,23 +447,7 @@ func TestUploadLinks(t *testing.T) {
 	c.expect(400, viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil)
 	c.expect(404, viewer, "GET", "/upload-links/code/not-a-real-code", nil)
 
-	// Finishing an upload gives the uploader access to watch the video. Without Vimeo the ticket step fails,
-	// so record its effect (the link was used by the viewer) in the database directly.
-	c.expect(404, viewer, "GET", "/videos/"+v.ID, nil)
-	var viewerMe model.Me
-	c.must(viewer, "GET", "/me", nil, &viewerMe)
-	if _, err := c.db.Exec(`UPDATE upload_links SET used_by = ?, used_at = 1 WHERE id = ?`, viewerMe.ID, l.ID); err != nil {
-		t.Fatal(err)
-	}
-	c.must(viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil, &target)
-	c.must(viewer, "POST", "/upload-links/code/"+l.Code+"/complete", nil, &target) // a retry adds no second grant
-	c.must(viewer, "GET", "/videos/"+v.ID, nil, nil)
-	var grants []model.AccessGrantInfo
-	c.must(creator, "GET", "/access?videoId="+v.ID, nil, &grants)
-	if len(grants) != 1 || grants[0].User.ID != viewerMe.ID || grants[0].QrCodeID != nil {
-		t.Fatalf("uploader grant = %+v", grants)
-	}
-
+	// TestUploadLinkNeedsTheFile covers the upload itself, with a fake Vimeo.
 	var links []model.UploadLinkInfo
 	c.must(creator, "GET", "/upload-links?videoId="+v.ID, nil, &links)
 	if len(links) != 1 {
@@ -508,4 +652,94 @@ func keys[V any](m map[string]V) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// An upload link gives access only for a file that Vimeo received, and only to the user whose upload it is.
+// Until then the video stays open for uploads, for the link and for the owner.
+func TestUploadLinkNeedsTheFile(t *testing.T) {
+	c, fv := newClientWithVimeo(t)
+	f := setup(t, c)
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Week 4", "directoryId": f.week.ID}, &v)
+	var l model.UploadLinkInfo
+	c.must(creator, "POST", "/upload-links", anyMap{"videoId": v.ID}, &l)
+	link := "/upload-links/code/" + l.Code
+
+	c.must(viewer, "POST", link+"/ticket", anyMap{"sizeBytes": 10}, nil)
+
+	// "complete" with no file sent: no access, no status change, and the link stays open.
+	st, raw := c.do(viewer, "POST", link+"/complete", nil, nil)
+	if st != http.StatusConflict || !strings.Contains(raw, "upload_incomplete") {
+		t.Fatalf("complete before the file arrived -> %d %s", st, raw)
+	}
+	c.expect(404, viewer, "GET", "/videos/"+v.ID, nil)
+	var seen model.VideoSummary
+	c.must(creator, "GET", "/videos/"+v.ID, nil, &seen)
+	if seen.Status != model.StatusUploading {
+		t.Fatalf("status = %q, want uploading", seen.Status)
+	}
+	var target model.UploadLinkTarget
+	c.must(viewer, "GET", link, nil, &target)
+	if !target.Open {
+		t.Fatal("link closed although no file arrived")
+	}
+	// The owner's own "complete" is checked the same way.
+	c.expect(409, creator, "POST", "/videos/"+v.ID+"/complete", nil)
+
+	// Vimeo has the whole file: the video is processing and the uploader may watch it.
+	var viewerMe model.Me
+	c.must(viewer, "GET", "/me", nil, &viewerMe)
+	fv.setUpload(vimeoIDOf(t, c, v.ID), "complete")
+	c.must(viewer, "POST", link+"/complete", nil, &target)
+	c.must(viewer, "POST", link+"/complete", nil, &target) // a retry adds no second grant
+	if target.Open {
+		t.Fatal("link still open after the file arrived")
+	}
+	c.must(viewer, "GET", "/videos/"+v.ID, nil, &seen)
+	if seen.Status != model.StatusProcessing {
+		t.Fatalf("status = %q, want processing", seen.Status)
+	}
+	var grants []model.AccessGrantInfo
+	c.must(creator, "GET", "/access?videoId="+v.ID, nil, &grants)
+	if len(grants) != 1 || grants[0].User.ID != viewerMe.ID || grants[0].QrCodeID != nil {
+		t.Fatalf("uploader grant = %+v", grants)
+	}
+
+	// An upload that Vimeo reports as failed makes the video "failed" and gives no access.
+	var v2 model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Week 5", "directoryId": f.week.ID}, &v2)
+	var l2 model.UploadLinkInfo
+	c.must(creator, "POST", "/upload-links", anyMap{"videoId": v2.ID}, &l2)
+	link2 := "/upload-links/code/" + l2.Code
+	c.must(viewer, "POST", link2+"/ticket", anyMap{"sizeBytes": 10}, nil)
+	viewerUpload := vimeoIDOf(t, c, v2.ID)
+	fv.setUpload(viewerUpload, "error")
+	c.expect(409, viewer, "POST", link2+"/complete", nil)
+	c.expect(404, viewer, "GET", "/videos/"+v2.ID, nil)
+	c.must(creator, "GET", "/videos/"+v2.ID, nil, &seen)
+	if seen.Status != model.StatusFailed {
+		t.Fatalf("status = %q, want failed", seen.Status)
+	}
+
+	// The owner uploads again, which replaces the link user's upload. When the owner's file arrives, the link
+	// user still gets nothing: the file is not theirs.
+	c.must(creator, "POST", "/videos/"+v2.ID+"/upload-ticket", anyMap{"sizeBytes": 10}, nil)
+	ownerUpload := vimeoIDOf(t, c, v2.ID)
+	if ownerUpload == viewerUpload || !fv.wasDeleted(viewerUpload) {
+		t.Fatalf("owner upload %s did not replace %s", ownerUpload, viewerUpload)
+	}
+	fv.setUpload(ownerUpload, "complete")
+	c.must(creator, "POST", "/videos/"+v2.ID+"/complete", nil, nil)
+	c.expect(409, viewer, "POST", link2+"/complete", nil)
+	c.expect(404, viewer, "GET", "/videos/"+v2.ID, nil)
+}
+
+// vimeoIDOf reads the Vimeo id the video points at. The API does not show it.
+func vimeoIDOf(t *testing.T, c client, videoID string) string {
+	t.Helper()
+	var id string
+	if err := c.db.QueryRow(`SELECT vimeo_id FROM videos WHERE id = ?`, videoID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

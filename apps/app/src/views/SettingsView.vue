@@ -8,7 +8,8 @@ import SelectButton from 'primevue/selectbutton'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import type { UserRole } from '@/types'
-import { errorMessage } from '@/services/api'
+import { api, errorMessage } from '@/services/api'
+import { countVideos } from '@/utils/tree'
 import { useAuthStore } from '@/stores/auth'
 import { colorMode, type ColorMode } from '@/services/colorMode'
 
@@ -93,6 +94,52 @@ async function signOut() {
   await auth.signOut()
   await router.replace({ name: 'sign-in' })
 }
+
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
+async function askDeleteAccount() {
+  const me = auth.me
+  if (!me) return
+  deleteError.value = null
+  // A creator must delete every video first. Check now, so the reason shows before the confirmation.
+  // The server checks again.
+  if (auth.isCreator) {
+    deleting.value = true
+    try {
+      const n = countVideos((await api.library.tree(me.id)).root)
+      if (n > 0) {
+        deleteError.value = `Your collection has ${n} ${n === 1 ? 'video' : 'videos'}. Delete all the videos in your collection before you delete your account.`
+        return
+      }
+    } catch (err) {
+      deleteError.value = errorMessage(err)
+      return
+    } finally {
+      deleting.value = false
+    }
+  }
+  confirm.require({
+    header: 'Delete account',
+    message: auth.isCreator
+      ? 'This deletes your account, your folders, QR codes, and upload links, and your access to other collections. You cannot undo this. Continue?'
+      : 'This deletes your account and your library. You lose access to all videos that were shared with you. You cannot undo this. Continue?',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: 'Cancel', severity: 'secondary', text: true },
+    acceptProps: { label: 'Delete account', severity: 'danger' },
+    accept: async () => {
+      deleting.value = true
+      try {
+        await auth.deleteAccount()
+        await router.replace({ name: 'sign-in' })
+      } catch (err) {
+        deleteError.value = errorMessage(err)
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
 </script>
 
 <template>
@@ -164,6 +211,24 @@ async function signOut() {
     <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
     <Button label="Sign out" icon="pi pi-sign-out" severity="secondary" outlined fluid style="margin-top: 8px" @click="signOut" />
+
+    <div class="danger-zone">
+      <Message v-if="deleteError" severity="error" class="mb">{{ deleteError }}</Message>
+      <Button
+        label="Delete account"
+        icon="pi pi-trash"
+        severity="danger"
+        outlined
+        fluid
+        :loading="deleting"
+        :disabled="busy"
+        @click="askDeleteAccount"
+      />
+      <p class="hint" style="margin: 8px 0 0">
+        <template v-if="auth.isCreator">You must delete all the videos in your collection first.</template>
+        <template v-else>This removes your account and your library. You cannot undo it.</template>
+      </p>
+    </div>
   </section>
 </template>
 
@@ -173,6 +238,12 @@ async function signOut() {
   align-items: center;
   gap: 14px;
   margin-bottom: 24px;
+}
+
+.danger-zone {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--p-content-border-color);
 }
 
 .avatar {

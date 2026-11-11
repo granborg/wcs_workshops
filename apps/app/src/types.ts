@@ -48,9 +48,12 @@ export interface VideoSummary {
   directoryId: string
   status: VideoStatus
   durationSec: number | null
-  /** Frame size in pixels and a thumbnail link, null until Vimeo has processed the video. */
+  /** The date the creator gives the video (for example, the day of the workshop), as YYYY-MM-DD. */
+  videoDate: string | null
+  /** Size of the video in pixels. Null until Vimeo has processed the video. */
   width: number | null
   height: number | null
+  /** A picture from the video on Vimeo's image server. Null until Vimeo has made one. */
   thumbnailUrl: string | null
   createdAt: string
   /** Set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video. */
@@ -156,6 +159,17 @@ export interface UploadTicket {
   videoId: string
   /** tus upload endpoint on Vimeo. */
   uploadLink: string
+}
+
+/** One size of a video file, with a temporary download link from Vimeo. */
+export interface VideoDownload {
+  /** For example "Original", "1080p" or "720p". */
+  label: string
+  width: number
+  height: number
+  sizeBytes: number
+  url: string
+  expiresAt: string | null
 }
 
 export interface PlaybackInfo {

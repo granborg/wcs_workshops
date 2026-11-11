@@ -62,5 +62,30 @@ export const useAuthStore = defineStore('auth', () => {
     me.value = await api.me.patch(patch)
   }
 
-  return { me, status, error, isCreator, init, refresh, signIn, signInWithEmail, createAccount, signOut, update }
+  /** Deletes the account on the server, then ends the session on this device. */
+  async function deleteAccount() {
+    await api.me.remove()
+    try {
+      await authService.signOut()
+    } catch {
+      // The server already removed the sign-in account. Only the local session is left, and it is cleared below.
+    }
+    me.value = null
+    status.value = 'signedOut'
+  }
+
+  return {
+    me,
+    status,
+    error,
+    isCreator,
+    init,
+    refresh,
+    signIn,
+    signInWithEmail,
+    createAccount,
+    signOut,
+    update,
+    deleteAccount,
+  }
 })

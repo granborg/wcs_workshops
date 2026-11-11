@@ -37,7 +37,7 @@ func New(cfg config.Config, database *sql.DB, verifier auth.Verifier, log *slog.
 	s := &Server{
 		cfg:      cfg,
 		st:       store.New(database),
-		vimeo:    vimeo.New(cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains),
+		vimeo:    vimeo.New(cfg.VimeoAPIURL, cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains),
 		verifier: verifier,
 		log:      log,
 	}
@@ -63,6 +63,7 @@ func (s *Server) routes() {
 	a := s.authed
 	m.Handle("GET /api/me", a(s.getMe))
 	m.Handle("PATCH /api/me", a(s.patchMe))
+	m.Handle("DELETE /api/me", a(s.deleteMe))
 
 	m.Handle("GET /api/library", a(s.listLibrary))
 	m.Handle("GET /api/library/{creatorId}", a(s.getLibraryTree))
@@ -77,6 +78,7 @@ func (s *Server) routes() {
 	m.Handle("POST /api/videos/{id}/complete", a(s.completeVideo))
 	m.Handle("GET /api/videos/{id}", a(s.getVideo))
 	m.Handle("GET /api/videos/{id}/playback", a(s.playback))
+	m.Handle("GET /api/videos/{id}/downloads", a(s.videoDownloads))
 	m.Handle("PATCH /api/videos/{id}", a(s.patchVideo))
 	m.Handle("DELETE /api/videos/{id}", a(s.deleteVideo))
 
@@ -151,11 +153,17 @@ func isUUID(s string) bool {
 	return err == nil
 }
 
-func clientIP(r *http.Request) *string {
+// clientIP is the caller's address for the audit trail. On Fly.io it is Fly-Client-IP, which Fly Proxy sets.
+// X-Forwarded-For is not used: a client can put any address first in it. Elsewhere it is the address of the
+// connection (in development behind the Vite proxy, that is the proxy).
+func (s *Server) clientIP(r *http.Request) *string {
+	if s.cfg.BehindFlyProxy {
+		if ip := strings.TrimSpace(r.Header.Get("Fly-Client-IP")); net.ParseIP(ip) != nil {
+			return &ip
+		}
+	}
 	ip := r.RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ip = strings.TrimSpace(strings.Split(xff, ",")[0])
-	} else if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
 	return &ip

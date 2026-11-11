@@ -40,7 +40,7 @@ func (s *Server) createUploadLink(w http.ResponseWriter, r *http.Request, u *mod
 	if err != nil {
 		return err
 	}
-	l, err := s.st.CreateUploadLink(ctx, code, v.OwnerID, v.ID, clientIP(r))
+	l, err := s.st.CreateUploadLink(ctx, code, v.OwnerID, v.ID, s.clientIP(r))
 	if err != nil {
 		return err
 	}
@@ -155,27 +155,32 @@ func (s *Server) uploadLinkTicket(w http.ResponseWriter, r *http.Request, u *mod
 	if err != nil {
 		return err
 	}
-	ticket, err := s.startUpload(ctx, v, req.SizeBytes)
+	ticket, updated, err := s.startUpload(ctx, v, req.SizeBytes)
 	if err != nil {
 		return err
 	}
-	// The link row records who uploaded, from where, and when. The audit log shows it.
-	if err := s.st.MarkUploadLinkUsed(ctx, l.ID, u.ID, clientIP(r)); err != nil {
+	// The link row records who uploaded, from where, when, and which Vimeo upload. The audit log shows it.
+	if err := s.st.MarkUploadLinkUsed(ctx, l.ID, u.ID, *updated.VimeoID, s.clientIP(r)); err != nil {
 		return err
 	}
 	httpx.WriteJSON(w, http.StatusCreated, ticket)
 	return nil
 }
 
-// uploadLinkComplete is step 2: the device finished sending the file. Only the user who started the upload may call it.
+// uploadLinkComplete is step 2: the device finished sending the file. Only the user who started the upload may
+// call it, and only for the upload they started: if the owner or someone else started a new upload since, this
+// user's upload is gone and gives nothing. Vimeo must confirm that the whole file arrived (see markUploaded).
 func (s *Server) uploadLinkComplete(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	ctx := r.Context()
 	l, v, err := s.openUploadLink(ctx, r.PathValue("code"))
 	if err != nil {
 		return err
 	}
-	if l.UsedBy == nil || *l.UsedBy != u.ID {
+	if l.UsedBy == nil || *l.UsedBy != u.ID || l.UsedVimeoID == nil {
 		return httpx.BadRequest("Start the upload with this link first")
+	}
+	if v.VimeoID == nil || *v.VimeoID != *l.UsedVimeoID {
+		return httpx.Conflict("A newer upload replaced yours. Start the upload again if the video still needs a file.")
 	}
 	if v, err = s.markUploaded(ctx, v); err != nil {
 		return err
@@ -188,7 +193,7 @@ func (s *Server) uploadLinkComplete(w http.ResponseWriter, r *http.Request, u *m
 			return err
 		}
 		if existing == nil {
-			if _, err := s.st.CreateGrant(ctx, u.ID, v.OwnerID, nil, &v.ID, nil, clientIP(r)); err != nil {
+			if _, err := s.st.CreateGrant(ctx, u.ID, v.OwnerID, nil, &v.ID, nil, s.clientIP(r)); err != nil {
 				return err
 			}
 		}

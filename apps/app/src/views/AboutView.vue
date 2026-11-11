@@ -50,6 +50,7 @@
         <li><strong>Name:</strong> You can change your name at any time. Viewers see a creator's name in their library. Creators see viewer names when they audit who has access.</li>
         <li><strong>Account type:</strong> Creator or Viewer. To change from creator to viewer, you must first delete your entire video collection.</li>
         <li><strong>Appearance:</strong> Light, dark, or the same as your device.</li>
+        <li><strong>Delete account:</strong> Deletes your account and your library. You cannot undo this. A creator must first delete all the videos in their collection.</li>
       </ul>
     </section>
 
@@ -61,11 +62,12 @@
       <p>If you are an admin of another creator's collection, a <strong>Collection</strong> field also shows. Use it to add the video to that collection. You can choose only the folders where you are an admin.</p>
 
       <h3>Upload now</h3>
-      <p>Choose the video file, a title, and the destination folder. The file goes directly from your device to Vimeo, which hosts the videos. Keep the app open until the upload finishes.</p>
+      <p>Choose the video file, a title, a date, and the destination folder. The file goes directly from your device to Vimeo, which hosts the videos. Keep the app open until the upload finishes.</p>
+      <p>The date is today's date unless you change it. Use the date of the workshop, for example. You can sort the videos in a folder by this date.</p>
       <p>If an upload did not finish or failed, open the video and upload the file again on its page.</p>
 
       <h3>Placeholder</h3>
-      <p>Use a placeholder when the video is not ready yet. A placeholder needs only a title and a folder. It shows in your collection with the tag "Not uploaded yet", and you can share it at once.</p>
+      <p>Use a placeholder when the video is not ready yet. A placeholder needs only a title and a folder. You can also give it a date. It shows in your collection with the tag "Not uploaded yet", and you can share it at once.</p>
       <p>When the file is ready, open the placeholder and upload the file on its page. Everyone who already has access sees the video then, and you do not have to share it again. This is useful for giving people access to a workshop video at the time of the lesson, and then uploading it for everyone later.</p>
       <p>If someone else filmed the workshop, give them an upload link for the placeholder. They upload the file, and you do not have to get the file from them first. To make the link, open the options of the placeholder and select <strong>Upload link</strong>, or select <strong>Upload link for someone else</strong> on the placeholder's page.</p>
     </section>
@@ -74,6 +76,7 @@
       <h2><i class="pi pi-folder" aria-hidden="true" /> Organizing your collection</h2>
       <p>You build and organize your video collection in folders. You can create, rename, and remove folders. Renaming a folder does not change who has access to it.</p>
       <p>When you remove a folder with videos in it, you are asked whether to delete all the videos or move them to another folder.</p>
+      <p>To sort the videos in a folder, select the <strong>Title</strong> or <strong>Date</strong> column header. Select it again to reverse the order. The app keeps your choice on this device.</p>
     </section>
 
     <section class="card">
@@ -82,6 +85,8 @@
       <dl>
         <dt>New folder (folders, owner only)</dt>
         <dd>Creates a folder inside this folder.</dd>
+        <dt>Upload video (folders)</dt>
+        <dd>Opens the Upload page with this folder as the destination folder.</dd>
         <dt>Share (QR code)</dt>
         <dd>Opens a QR code for the folder or video. If one was already created, you can show, print, or copy the link of the existing one. You can also generate a new one and optionally set an expiration date and time. The QR code grants any user who scans it access to that folder or video. It is added to their library.</dd>
         <dt>View / edit access</dt>
@@ -90,8 +95,12 @@
         <dd>Shows a link and a QR code that let someone else upload the file of this video. When the upload finishes, that person gets access to watch the video. You see who used the link and when. You can revoke the link at any time.</dd>
         <dt>Admins (folders, owner only)</dt>
         <dd>Add or remove the admins of the folder. See "Collection admins" below.</dd>
+        <dt>Download (videos)</dt>
+        <dd>Download the video file from Vimeo. Choose the original file or a smaller size. You cannot download a whole folder at once.</dd>
         <dt>Rename</dt>
         <dd>Change the name. Access stays the same.</dd>
+        <dt>Set date (videos)</dt>
+        <dd>Change or remove the date of the video. Videos with no date show last when you sort by date.</dd>
         <dt>Move</dt>
         <dd>Move a folder or video to another folder. This can change who has access: access given on the item itself follows it, and access that came from the old folder stops.</dd>
         <dt>Delete</dt>
