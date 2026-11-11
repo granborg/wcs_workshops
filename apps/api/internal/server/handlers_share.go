@@ -86,7 +86,7 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request, u *model.Us
 		return err
 	}
 	// The code belongs to the collection owner, also when an admin creates it.
-	qr, err := s.st.CreateQrCode(ctx, code, ownerID, dirID, vidID, clientIP(r), expires)
+	qr, err := s.st.CreateQrCode(ctx, code, ownerID, dirID, vidID, s.clientIP(r), expires)
 	if err != nil {
 		return err
 	}

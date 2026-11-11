@@ -114,8 +114,10 @@ type UploadLink struct {
 	UsedByName *string
 	UsedIP     *string
 	UsedAt     *time.Time
-	RevokedAt  *time.Time
-	CreatedAt  time.Time
+	// UsedVimeoID is the Vimeo upload that UsedBy started. Only that upload, when complete, gives access.
+	UsedVimeoID *string
+	RevokedAt   *time.Time
+	CreatedAt   time.Time
 }
 
 type AccessGrant struct {

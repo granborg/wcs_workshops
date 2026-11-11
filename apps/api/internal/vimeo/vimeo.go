@@ -15,7 +15,8 @@ import (
 	"time"
 )
 
-const baseURL = "https://api.vimeo.com"
+// DefaultAPIURL is Vimeo's API. Tests point the client at a fake.
+const DefaultAPIURL = "https://api.vimeo.com"
 
 // ErrNotConfigured is returned when no access token is set.
 var ErrNotConfigured = errors.New("VIMEO_ACCESS_TOKEN is not set")
@@ -32,15 +33,19 @@ func (e *APIError) Error() string {
 
 // Client talks to Vimeo with one server-to-server token.
 type Client struct {
+	apiURL       string
 	token        string
 	privacy      string // "unlisted" or "disable"
 	embedDomains []string
 	http         *http.Client
 }
 
-// New creates a Client. privacy must be "unlisted" or "disable".
-func New(token, privacy string, embedDomains []string) *Client {
-	return &Client{token: token, privacy: privacy, embedDomains: embedDomains, http: &http.Client{Timeout: 30 * time.Second}}
+// New creates a Client. apiURL is DefaultAPIURL outside tests. privacy must be "unlisted" or "disable".
+func New(apiURL, token, privacy string, embedDomains []string) *Client {
+	return &Client{
+		apiURL: strings.TrimRight(apiURL, "/"), token: token, privacy: privacy, embedDomains: embedDomains,
+		http: &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 // Video is the subset of Vimeo's video representation we read.
@@ -111,7 +116,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		reader = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.apiURL+path, reader)
 	if err != nil {
 		return err
 	}

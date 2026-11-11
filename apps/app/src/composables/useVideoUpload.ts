@@ -1,9 +1,26 @@
 import { computed, ref } from 'vue'
 import { Upload } from 'tus-js-client'
 import type { UploadTicket, VideoSummary } from '@/types'
-import { api } from '@/services/api'
+import { api, ApiRequestError } from '@/services/api'
 
 export type UploadPhase = 'idle' | 'reserving' | 'uploading' | 'finishing' | 'done'
+
+/**
+ * The API confirms the upload with Vimeo, and answers 409 "upload_incomplete" until Vimeo reports the whole file.
+ * Vimeo can take a moment after the last byte, so try again a few times before giving up.
+ */
+async function whenVimeoHasFile<T>(call: () => Promise<T>): Promise<T> {
+  const attempts = 6
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call()
+    } catch (err) {
+      const waiting = err instanceof ApiRequestError && err.code === 'upload_incomplete'
+      if (!waiting || attempt >= attempts) throw err
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+  }
+}
 
 /**
  * Sends a file to Vimeo in three steps: get a ticket from the API, send the bytes with tus, then tell the API
@@ -39,7 +56,7 @@ export function useVideoUpload() {
         }).start()
       })
       phase.value = 'finishing'
-      const result = await complete(ticket.videoId)
+      const result = await whenVimeoHasFile(() => complete(ticket.videoId))
       phase.value = 'done'
       return result
     } catch (err) {

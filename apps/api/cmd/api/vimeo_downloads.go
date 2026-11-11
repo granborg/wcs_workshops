@@ -21,7 +21,7 @@ func runVimeoDownloads(args []string) int {
 		fmt.Fprintln(os.Stderr, "configuration error:", err)
 		return 1
 	}
-	client := vimeo.New(cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains)
+	client := vimeo.New(cfg.VimeoAPIURL, cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains)
 	files, err := client.Downloads(context.Background(), args[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "read downloads:", err)

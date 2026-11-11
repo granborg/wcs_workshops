@@ -11,11 +11,15 @@ import (
 
 // Config holds every runtime setting. Defaults suit local development.
 type Config struct {
-	Addr              string
-	DatabasePath      string
-	CORSOrigins       []string
-	PublicURL         string // origin QR links point to, e.g. https://wcs-workshops.fly.dev; empty = request origin
+	Addr         string
+	DatabasePath string
+	CORSOrigins  []string
+	PublicURL    string // origin QR links point to, e.g. https://wcs-workshops.fly.dev; empty = request origin
+	// BehindFlyProxy is true on Fly.io (FLY_APP_NAME is set there). Only then does the server trust the
+	// Fly-Client-IP header, which Fly Proxy sets; elsewhere any client could send it.
+	BehindFlyProxy    bool
 	FirebaseProjectID string
+	VimeoAPIURL       string // Vimeo's API; only tests change it
 	VimeoAccessToken  string
 	VimeoPrivacy      string // "unlisted" or "disable"
 	VimeoEmbedDomains []string
@@ -34,7 +38,9 @@ func Load() (Config, error) {
 		DatabasePath:      get("DATABASE_PATH", "./data/wcs.db"),
 		CORSOrigins:       list("CORS_ORIGINS", "http://localhost:5173,capacitor://localhost,http://localhost"),
 		PublicURL:         strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+		BehindFlyProxy:    os.Getenv("FLY_APP_NAME") != "",
 		FirebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
+		VimeoAPIURL:       "https://api.vimeo.com",
 		VimeoAccessToken:  os.Getenv("VIMEO_ACCESS_TOKEN"),
 		VimeoPrivacy:      get("VIMEO_PRIVACY", "unlisted"),
 		VimeoEmbedDomains: list("VIMEO_EMBED_DOMAINS", ""),

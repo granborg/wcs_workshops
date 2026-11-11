@@ -76,7 +76,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request, u *model.User) e
 	}
 	if existing == nil {
 		// The grant row is also the audit record: who, when, from which IP, with which code.
-		if _, err := s.st.CreateGrant(ctx, u.ID, qr.CreatorID, qr.DirectoryID, qr.VideoID, &qr.ID, clientIP(r)); err != nil {
+		if _, err := s.st.CreateGrant(ctx, u.ID, qr.CreatorID, qr.DirectoryID, qr.VideoID, &qr.ID, s.clientIP(r)); err != nil {
 			return err
 		}
 	}

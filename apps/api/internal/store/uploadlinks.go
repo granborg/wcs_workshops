@@ -8,15 +8,17 @@ import (
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
 )
 
-const uploadLinkCols = `l.id, l.code, l.owner_id, l.video_id, l.created_ip, l.used_by, l.used_ip, l.used_at, l.revoked_at, l.created_at,
+const uploadLinkCols = `l.id, l.code, l.owner_id, l.video_id, l.created_ip, l.used_by, l.used_ip, l.used_at, l.used_vimeo_id,
+	l.revoked_at, l.created_at,
 	(SELECT name FROM users u WHERE u.id = l.used_by)`
 
 func scanUploadLink(r scanner) (*model.UploadLink, error) {
 	var l model.UploadLink
-	var createdIP, usedBy, usedIP, usedByName sql.NullString
+	var createdIP, usedBy, usedIP, usedByName, usedVimeoID sql.NullString
 	var usedAt, revoked sql.NullInt64
 	var created int64
-	if err := r.Scan(&l.ID, &l.Code, &l.OwnerID, &l.VideoID, &createdIP, &usedBy, &usedIP, &usedAt, &revoked, &created, &usedByName); err != nil {
+	if err := r.Scan(&l.ID, &l.Code, &l.OwnerID, &l.VideoID, &createdIP, &usedBy, &usedIP, &usedAt, &usedVimeoID,
+		&revoked, &created, &usedByName); err != nil {
 		return nil, err
 	}
 	l.CreatedIP = ptrStr(createdIP)
@@ -24,6 +26,7 @@ func scanUploadLink(r scanner) (*model.UploadLink, error) {
 	l.UsedByName = ptrStr(usedByName)
 	l.UsedIP = ptrStr(usedIP)
 	l.UsedAt = ptrTime(usedAt)
+	l.UsedVimeoID = ptrStr(usedVimeoID)
 	l.RevokedAt = ptrTime(revoked)
 	l.CreatedAt = fromMs(created)
 	return &l, nil
@@ -59,10 +62,10 @@ func (s *Store) CreateUploadLink(ctx context.Context, code, ownerID, videoID str
 	return s.GetUploadLink(ctx, id)
 }
 
-// MarkUploadLinkUsed records who started an upload with the link, and when.
-func (s *Store) MarkUploadLinkUsed(ctx context.Context, id, userID string, ip *string) error {
-	return s.exec(ctx, `UPDATE upload_links SET used_by = ?, used_ip = ?, used_at = ? WHERE id = ?`,
-		userID, nullStr(ip), toMs(now()), id)
+// MarkUploadLinkUsed records who started an upload with the link, when, and which Vimeo upload it is.
+func (s *Store) MarkUploadLinkUsed(ctx context.Context, id, userID, vimeoID string, ip *string) error {
+	return s.exec(ctx, `UPDATE upload_links SET used_by = ?, used_ip = ?, used_at = ?, used_vimeo_id = ? WHERE id = ?`,
+		userID, nullStr(ip), toMs(now()), vimeoID, id)
 }
 
 func (s *Store) RevokeUploadLink(ctx context.Context, id string, at time.Time) error {

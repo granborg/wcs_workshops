@@ -97,19 +97,6 @@ func (s *Store) UpdateVideo(ctx context.Context, id string, title, directoryID, 
 	return s.GetVideo(ctx, id)
 }
 
-func (s *Store) UpdateVideoStatus(ctx context.Context, id, status string, durationSec *int) (*model.Video, error) {
-	var dur any
-	if durationSec != nil {
-		dur = *durationSec
-	}
-	if err := s.exec(ctx,
-		`UPDATE videos SET status = ?, duration_sec = COALESCE(?, duration_sec), updated_at = ? WHERE id = ?`,
-		status, dur, toMs(now()), id); err != nil {
-		return nil, err
-	}
-	return s.GetVideo(ctx, id)
-}
-
 // UpdateVideoFromVimeo stores what Vimeo reports about the video. Nil values keep what is stored.
 func (s *Store) UpdateVideoFromVimeo(ctx context.Context, id, status string, durationSec, width, height *int, thumbnailURL *string) (*model.Video, error) {
 	t := toMs(now())

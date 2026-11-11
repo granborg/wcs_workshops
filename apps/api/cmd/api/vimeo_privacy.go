@@ -77,7 +77,7 @@ func runVimeoPrivacy(args []string) int {
 	defer database.Close()
 
 	ctx := context.Background()
-	client := vimeo.New(cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains)
+	client := vimeo.New(cfg.VimeoAPIURL, cfg.VimeoAccessToken, cfg.VimeoPrivacy, cfg.VimeoEmbedDomains)
 	name, account, err := client.Account(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "read Vimeo account:", err)

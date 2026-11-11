@@ -128,7 +128,7 @@ func (s *Server) videoUploadTicket(w http.ResponseWriter, r *http.Request, u *mo
 	if err != nil {
 		return err
 	}
-	ticket, err := s.startUpload(ctx, v, req.SizeBytes)
+	ticket, _, err := s.startUpload(ctx, v, req.SizeBytes)
 	if err != nil {
 		return err
 	}
@@ -137,24 +137,25 @@ func (s *Server) videoUploadTicket(w http.ResponseWriter, r *http.Request, u *mo
 }
 
 // startUpload reserves a new Vimeo upload for a video that has no file yet, and points the video at it.
-// A previous Vimeo video, if any, is deleted after the new one is reserved.
-func (s *Server) startUpload(ctx context.Context, v *model.Video, sizeBytes int64) (*model.UploadTicket, error) {
+// A previous Vimeo video, if any, is deleted after the new one is reserved. It returns the updated video.
+func (s *Server) startUpload(ctx context.Context, v *model.Video, sizeBytes int64) (*model.UploadTicket, *model.Video, error) {
 	if v.HasFile() {
-		return nil, httpx.BadRequest("This video already has a file")
+		return nil, nil, httpx.BadRequest("This video already has a file")
 	}
 	created, err := s.vimeo.CreateTusUpload(ctx, v.Title, sizeBytes)
 	if err != nil {
-		return nil, vimeoErr(err)
+		return nil, nil, vimeoErr(err)
 	}
-	if _, err := s.st.AttachUpload(ctx, v.ID, created.VimeoID, created.Hash); err != nil {
-		return nil, err
+	updated, err := s.st.AttachUpload(ctx, v.ID, created.VimeoID, created.Hash)
+	if err != nil {
+		return nil, nil, err
 	}
 	if v.VimeoID != nil {
 		if err := s.vimeo.Delete(ctx, *v.VimeoID); err != nil && !errors.Is(err, vimeo.ErrNotConfigured) {
 			s.log.Warn("vimeo delete of replaced upload failed", "video", v.ID, "err", err)
 		}
 	}
-	return &model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink}, nil
+	return &model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink}, updated, nil
 }
 
 // mediaRecheck is how long the app waits before it asks Vimeo again for a missing size or thumbnail.
@@ -192,6 +193,11 @@ func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Vide
 		}
 		return v, nil
 	}
+	return s.storeRemote(ctx, v, remote)
+}
+
+// storeRemote stores the status, size and thumbnail that Vimeo reported for the video.
+func (s *Server) storeRemote(ctx context.Context, v *model.Video, remote *vimeo.Video) (*model.Video, error) {
 	status := v.Status
 	switch {
 	case remote.Transcode != nil && remote.Transcode.Status == "complete":
@@ -231,15 +237,36 @@ func (s *Server) completeVideo(w http.ResponseWriter, r *http.Request, u *model.
 	return nil
 }
 
-// markUploaded records that the device finished sending the file, then asks Vimeo for the status.
+// errUploadIncomplete answers a "complete" call while Vimeo does not have the whole file. The app tries again,
+// because Vimeo can take a moment to report the end of an upload.
+var errUploadIncomplete = httpx.NewError(http.StatusConflict, "upload_incomplete",
+	"Vimeo has not received the whole file. Keep the app open until the upload finishes.")
+
+// markUploaded records that the file arrived, after Vimeo confirms it. The device's word is not enough:
+// a video with a file closes its upload links and stops new uploads, and an upload link gives access.
+// A retry after success finds the video already processing or ready, and only refreshes it.
 func (s *Server) markUploaded(ctx context.Context, v *model.Video) (*model.Video, error) {
-	if v.Status == model.StatusUploading {
-		var err error
-		if v, err = s.st.UpdateVideoStatus(ctx, v.ID, model.StatusProcessing, nil); err != nil {
+	if v.HasFile() {
+		return s.refreshStatus(ctx, v)
+	}
+	if v.Status != model.StatusUploading || v.VimeoID == nil {
+		return nil, httpx.BadRequest("There is no upload in progress for this video")
+	}
+	remote, err := s.vimeo.GetVideo(ctx, *v.VimeoID)
+	if err != nil {
+		return nil, vimeoErr(err)
+	}
+	switch {
+	case remote.Upload != nil && remote.Upload.Status == "complete":
+		return s.storeRemote(ctx, v, remote) // processing, or ready when Vimeo is already done
+	case remote.Upload != nil && remote.Upload.Status == "error":
+		if _, err := s.storeRemote(ctx, v, remote); err != nil { // failed: the owner can upload again
 			return nil, err
 		}
+		return nil, httpx.Conflict("Vimeo could not receive the file. Upload it again.")
+	default:
+		return nil, errUploadIncomplete
 	}
-	return s.refreshStatus(ctx, v)
 }
 
 func (s *Server) visibleVideo(ctx context.Context, u *model.User, id string) (*model.Video, error) {
