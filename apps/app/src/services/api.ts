@@ -14,6 +14,7 @@ import type {
   UploadLinkTarget,
   UploadTicket,
   UserRole,
+  VideoDownload,
   VideoSummary,
 } from '@/types'
 import { authService } from './auth'
@@ -62,12 +63,21 @@ function qs(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : ''
 }
 
+/** A new video. videoDate is YYYY-MM-DD. */
+export interface NewVideo {
+  title: string
+  directoryId: string
+  videoDate?: string
+}
+
 export type ShareTarget = { directoryId: string; videoId?: undefined } | { videoId: string; directoryId?: undefined }
 
 export const api = {
   me: {
     get: () => request<Me>('GET', '/me'),
     patch: (patch: { name?: string; role?: UserRole }) => request<Me>('PATCH', '/me', patch),
+    /** Deletes the account and its sign-in. A creator must delete every video in their collection first. */
+    remove: () => request<void>('DELETE', '/me'),
   },
   library: {
     list: () => request<CreatorSummary[]>('GET', '/library'),
@@ -81,18 +91,22 @@ export const api = {
       request<void>('DELETE', `/directories/${id}${qs({ mode, targetDirectoryId })}`),
   },
   videos: {
-    ticket: (title: string, directoryId: string, sizeBytes: number) =>
-      request<UploadTicket>('POST', '/videos/upload-ticket', { title, directoryId, sizeBytes }),
+    ticket: (video: NewVideo, sizeBytes: number) =>
+      request<UploadTicket>('POST', '/videos/upload-ticket', { ...video, sizeBytes }),
     /** A video with no file yet. Upload to it later with ticketFor. */
-    placeholder: (title: string, directoryId: string) =>
-      request<VideoSummary>('POST', '/videos/placeholder', { title, directoryId }),
+    placeholder: (video: NewVideo) => request<VideoSummary>('POST', '/videos/placeholder', video),
     /** Upload ticket for an existing video: a placeholder, an upload that did not finish, or a failed video. */
     ticketFor: (id: string, sizeBytes: number) => request<UploadTicket>('POST', `/videos/${id}/upload-ticket`, { sizeBytes }),
     complete: (id: string) => request<VideoSummary>('POST', `/videos/${id}/complete`),
     get: (id: string) => request<VideoSummary>('GET', `/videos/${id}`),
     playback: (id: string) => request<PlaybackInfo>('GET', `/videos/${id}/playback`),
+    /** The sizes the owner or an admin can download, largest first. The links expire. */
+    downloads: (id: string) => request<VideoDownload[]>('GET', `/videos/${id}/downloads`),
     rename: (id: string, title: string) => request<VideoSummary>('PATCH', `/videos/${id}`, { title }),
     move: (id: string, directoryId: string) => request<VideoSummary>('PATCH', `/videos/${id}`, { directoryId }),
+    /** Sets the date (YYYY-MM-DD), or clears it with null. */
+    setDate: (id: string, videoDate: string | null) =>
+      request<VideoSummary>('PATCH', `/videos/${id}`, { videoDate: videoDate ?? '' }),
     remove: (id: string) => request<void>('DELETE', `/videos/${id}`),
   },
   share: {

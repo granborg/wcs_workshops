@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/granborg/wcs_workshops/apps/api/internal/httpx"
 	"github.com/granborg/wcs_workshops/apps/api/internal/model"
@@ -13,9 +15,21 @@ import (
 )
 
 type uploadTicketRequest struct {
-	Title       string `json:"title"`
-	DirectoryID string `json:"directoryId"`
-	SizeBytes   int64  `json:"sizeBytes"`
+	Title       string  `json:"title"`
+	DirectoryID string  `json:"directoryId"`
+	VideoDate   *string `json:"videoDate"`
+	SizeBytes   int64   `json:"sizeBytes"`
+}
+
+// validVideoDate accepts nil, or a calendar date as YYYY-MM-DD. With allowEmpty, "" means "clear the date".
+func validVideoDate(d *string, allowEmpty bool) error {
+	if d == nil || (allowEmpty && *d == "") {
+		return nil
+	}
+	if _, err := time.Parse(time.DateOnly, *d); err != nil {
+		return httpx.BadRequest("videoDate must be a date as YYYY-MM-DD")
+	}
+	return nil
 }
 
 // uploadTicket is step 1 of upload: reserve the video on Vimeo and return the tus link for the device.
@@ -35,6 +49,9 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 	if req.SizeBytes <= 0 {
 		return httpx.BadRequest("sizeBytes must be positive")
 	}
+	if err := validVideoDate(req.VideoDate, false); err != nil {
+		return err
+	}
 	dir, err := s.managedDirectory(ctx, u, req.DirectoryID)
 	if err != nil {
 		return err
@@ -44,7 +61,7 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 		return vimeoErr(err)
 	}
 	// The video belongs to the collection owner, also when an admin uploads it.
-	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, &created.VimeoID, created.Hash)
+	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, req.VideoDate, &created.VimeoID, created.Hash)
 	if err != nil {
 		return err
 	}
@@ -53,8 +70,9 @@ func (s *Server) uploadTicket(w http.ResponseWriter, r *http.Request, u *model.U
 }
 
 type placeholderRequest struct {
-	Title       string `json:"title"`
-	DirectoryID string `json:"directoryId"`
+	Title       string  `json:"title"`
+	DirectoryID string  `json:"directoryId"`
+	VideoDate   *string `json:"videoDate"`
 }
 
 // createPlaceholder adds a video with no file yet. It shows in the library and can be shared now;
@@ -72,11 +90,14 @@ func (s *Server) createPlaceholder(w http.ResponseWriter, r *http.Request, u *mo
 	if err != nil {
 		return err
 	}
+	if err := validVideoDate(req.VideoDate, false); err != nil {
+		return err
+	}
 	dir, err := s.managedDirectory(ctx, u, req.DirectoryID)
 	if err != nil {
 		return err
 	}
-	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, nil, nil)
+	v, err := s.st.CreateVideo(ctx, dir.OwnerID, dir.ID, *title, req.VideoDate, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -136,9 +157,32 @@ func (s *Server) startUpload(ctx context.Context, v *model.Video, sizeBytes int6
 	return &model.UploadTicket{VideoID: v.ID, UploadLink: created.UploadLink}, nil
 }
 
-// refreshStatus asks Vimeo for the transcode state and stores it. Vimeo errors leave the row unchanged.
+// mediaRecheck is how long the app waits before it asks Vimeo again for a missing size or thumbnail.
+// Vimeo can make the thumbnail a short time after processing is done.
+const mediaRecheck = 10 * time.Minute
+
+// wantsRefresh reports whether a page that shows the video should ask Vimeo about it first: it is still
+// processing, or it is ready but its size or thumbnail is missing. An upload that is in progress (or was
+// abandoned) is not asked about here; the uploader's device reports when it is done.
+func wantsRefresh(v *model.Video) bool {
+	if v.VimeoID == nil {
+		return false
+	}
+	if v.Status == model.StatusProcessing {
+		return true
+	}
+	return v.Status == model.StatusReady && missingMedia(v) &&
+		(v.MediaCheckedAt == nil || time.Since(*v.MediaCheckedAt) > mediaRecheck)
+}
+
+func missingMedia(v *model.Video) bool {
+	return v.Width == nil || v.Height == nil || v.ThumbnailURL == nil
+}
+
+// refreshStatus asks Vimeo for the transcode state, size and thumbnail, and stores them. Vimeo errors leave
+// the row unchanged.
 func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Video, error) {
-	if v.VimeoID == nil || v.Status == model.StatusReady || v.Status == model.StatusFailed {
+	if v.VimeoID == nil || v.Status == model.StatusFailed || (v.Status == model.StatusReady && !missingMedia(v)) {
 		return v, nil
 	}
 	remote, err := s.vimeo.GetVideo(ctx, *v.VimeoID)
@@ -158,12 +202,19 @@ func (s *Server) refreshStatus(ctx context.Context, v *model.Video) (*model.Vide
 	case remote.Upload != nil && remote.Upload.Status == "complete":
 		status = model.StatusProcessing
 	}
-	var dur *int
+	var dur, width, height *int
 	if remote.Duration > 0 {
 		d := int(math.Round(remote.Duration))
 		dur = &d
 	}
-	return s.st.UpdateVideoStatus(ctx, v.ID, status, dur)
+	if remote.Width > 0 && remote.Height > 0 {
+		width, height = &remote.Width, &remote.Height
+	}
+	var thumb *string
+	if t := remote.Thumbnail(); t != "" {
+		thumb = &t
+	}
+	return s.st.UpdateVideoFromVimeo(ctx, v.ID, status, dur, width, height, thumb)
 }
 
 // completeVideo is step 2 of upload: the device finished sending bytes.
@@ -218,7 +269,7 @@ func (s *Server) getVideo(w http.ResponseWriter, r *http.Request, u *model.User)
 	if err != nil {
 		return err
 	}
-	if v.Status == model.StatusProcessing {
+	if wantsRefresh(v) {
 		if v, err = s.refreshStatus(ctx, v); err != nil {
 			return err
 		}
@@ -245,12 +296,63 @@ func (s *Server) playback(w http.ResponseWriter, r *http.Request, u *model.User)
 	return nil
 }
 
+// videoDownloads lists the sizes of the video file that Vimeo can give, largest first, with temporary links.
+// Only the owner and admins can download, as on vimeo.com, where downloads are turned off for viewers.
+func (s *Server) videoDownloads(w http.ResponseWriter, r *http.Request, u *model.User) error {
+	ctx := r.Context()
+	v, err := s.managedVideo(ctx, u, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	if v.VimeoID == nil || v.Status != model.StatusReady {
+		return httpx.BadRequest("The video is not ready to download")
+	}
+	files, err := s.vimeo.Downloads(ctx, *v.VimeoID)
+	if err != nil {
+		return vimeoErr(err)
+	}
+	out := make([]model.VideoDownload, 0, len(files))
+	for _, f := range files {
+		if f.Link == "" {
+			continue
+		}
+		label := f.Rendition
+		if f.Quality == "source" || f.Rendition == "source" {
+			label = "Original"
+		} else if label == "" {
+			label = f.PublicName
+		}
+		var expires *string
+		if f.Expires != "" {
+			expires = &f.Expires
+		}
+		out = append(out, model.VideoDownload{
+			Label: label, Width: f.Width, Height: f.Height, SizeBytes: f.Size, URL: f.Link, ExpiresAt: expires,
+		})
+	}
+	// The original first, then the largest size first.
+	slices.SortStableFunc(out, func(a, b model.VideoDownload) int {
+		if (a.Label == "Original") != (b.Label == "Original") {
+			if a.Label == "Original" {
+				return -1
+			}
+			return 1
+		}
+		return b.Height - a.Height
+	})
+	httpx.WriteJSON(w, http.StatusOK, out)
+	return nil
+}
+
 type patchVideoRequest struct {
 	Title       *string `json:"title"`
 	DirectoryID *string `json:"directoryId"`
+	// VideoDate is YYYY-MM-DD, or "" to clear the date.
+	VideoDate *string `json:"videoDate"`
 }
 
-// patchVideo renames and/or moves. Direct grants follow the video; inherited access changes implicitly.
+// patchVideo renames, moves and/or changes the date. Direct grants follow the video; inherited access changes
+// implicitly.
 func (s *Server) patchVideo(w http.ResponseWriter, r *http.Request, u *model.User) error {
 	if err := requireCreator(u); err != nil {
 		return err
@@ -260,11 +362,14 @@ func (s *Server) patchVideo(w http.ResponseWriter, r *http.Request, u *model.Use
 	if err := httpx.Decode(r, &req); err != nil {
 		return err
 	}
-	if req.Title == nil && req.DirectoryID == nil {
+	if req.Title == nil && req.DirectoryID == nil && req.VideoDate == nil {
 		return httpx.BadRequest("Nothing to change")
 	}
 	title, err := validName(req.Title, 120)
 	if err != nil {
+		return err
+	}
+	if err := validVideoDate(req.VideoDate, true); err != nil {
 		return err
 	}
 	v, err := s.managedVideo(ctx, u, r.PathValue("id"))
@@ -281,7 +386,7 @@ func (s *Server) patchVideo(w http.ResponseWriter, r *http.Request, u *model.Use
 			return httpx.NotFound("Directory")
 		}
 	}
-	updated, err := s.st.UpdateVideo(ctx, v.ID, title, req.DirectoryID)
+	updated, err := s.st.UpdateVideo(ctx, v.ID, title, req.DirectoryID, req.VideoDate)
 	if err != nil {
 		return err
 	}

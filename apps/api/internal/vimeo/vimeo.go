@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,6 +58,38 @@ type Video struct {
 	Transcode *struct {
 		Status string `json:"status"`
 	} `json:"transcode"`
+	Width    int `json:"width"`
+	Height   int `json:"height"`
+	Pictures *struct {
+		// DefaultPicture is true while the picture is Vimeo's gray placeholder, not one from the video.
+		DefaultPicture bool `json:"default_picture"`
+		Sizes          []struct {
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			Link   string `json:"link"`
+		} `json:"sizes"`
+	} `json:"pictures"`
+}
+
+// Thumbnail returns a picture from the video at least 640 pixels wide (or the largest there is), or "" when
+// Vimeo has not made one yet.
+func (v *Video) Thumbnail() string {
+	if v.Pictures == nil || v.Pictures.DefaultPicture {
+		return ""
+	}
+	best, bestWidth := "", 0
+	for _, s := range v.Pictures.Sizes {
+		if s.Link == "" {
+			continue
+		}
+		switch {
+		case best == "",
+			bestWidth < 640 && s.Width > bestWidth,
+			s.Width >= 640 && s.Width < bestWidth:
+			best, bestWidth = s.Link, s.Width
+		}
+	}
+	return best
 }
 
 // Created describes a freshly reserved upload.
@@ -133,14 +166,109 @@ func (c *Client) CreateTusUpload(ctx context.Context, name string, sizeBytes int
 	if v.Upload == nil || v.Upload.UploadLink == "" {
 		return nil, &APIError{Status: 502, Body: "Vimeo did not return an upload link"}
 	}
-	return &Created{VimeoID: IDFromURI(v.URI), Hash: HashFromLink(v.Link), UploadLink: v.Upload.UploadLink}, nil
+	id := IDFromURI(v.URI)
+	// Also add each domain with its own request, so the allow list does not depend on Vimeo reading
+	// embed_domains from the create request. With an empty allow list the video plays nowhere.
+	if err := c.allowDomains(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Created{VimeoID: id, Hash: HashFromLink(v.Link), UploadLink: v.Upload.UploadLink}, nil
+}
+
+// Privacy is what Vimeo reports for one video.
+type Privacy struct {
+	View    string
+	Embed   string
+	Domains []string
+}
+
+// Account returns the plan of the account that owns the token, for example "free", "basic" or "plus".
+func (c *Client) Account(ctx context.Context) (name, account string, err error) {
+	var me struct {
+		Name    string `json:"name"`
+		Account string `json:"account"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/me?fields=name,account", nil, &me); err != nil {
+		return "", "", err
+	}
+	return me.Name, me.Account, nil
+}
+
+// GetPrivacy reads the view and embed settings of a video, and its embed allow list.
+func (c *Client) GetPrivacy(ctx context.Context, vimeoID string) (*Privacy, error) {
+	var v struct {
+		Privacy struct {
+			View  string `json:"view"`
+			Embed string `json:"embed"`
+		} `json:"privacy"`
+	}
+	path := "/videos/" + url.PathEscape(vimeoID)
+	if err := c.do(ctx, http.MethodGet, path+"?fields=privacy.view,privacy.embed", nil, &v); err != nil {
+		return nil, err
+	}
+	p := &Privacy{View: v.Privacy.View, Embed: v.Privacy.Embed, Domains: []string{}}
+	if p.Embed != "whitelist" {
+		return p, nil
+	}
+	var list struct {
+		Data []struct {
+			Domain string `json:"domain"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, path+"/privacy/domains?per_page=100", nil, &list); err != nil {
+		return nil, err
+	}
+	for _, d := range list.Data {
+		p.Domains = append(p.Domains, d.Domain)
+	}
+	return p, nil
+}
+
+// ApplyPrivacy sets the configured privacy on an existing video, the same as a new upload gets.
+func (c *Client) ApplyPrivacy(ctx context.Context, vimeoID string) error {
+	if err := c.do(ctx, http.MethodPatch, "/videos/"+url.PathEscape(vimeoID), c.privacyBody(), nil); err != nil {
+		return err
+	}
+	return c.allowDomains(ctx, vimeoID)
+}
+
+// Wants reports whether p matches the configured privacy. Extra allowed domains are not a mismatch.
+func (c *Client) Wants(p *Privacy) bool {
+	want := c.privacyBody()["privacy"].(map[string]any)
+	if p.View != want["view"] || p.Embed != want["embed"] {
+		return false
+	}
+	if c.privacy != "disable" {
+		return true
+	}
+	for _, d := range c.embedDomains {
+		if !slices.Contains(p.Domains, d) {
+			return false
+		}
+	}
+	return true
+}
+
+// allowDomains adds each configured embed domain to the video's allow list. Only "disable" mode uses the list.
+func (c *Client) allowDomains(ctx context.Context, vimeoID string) error {
+	if c.privacy != "disable" {
+		return nil
+	}
+	for _, d := range c.embedDomains {
+		path := "/videos/" + url.PathEscape(vimeoID) + "/privacy/domains/" + url.PathEscape(d)
+		if err := c.do(ctx, http.MethodPut, path, nil, nil); err != nil {
+			return fmt.Errorf("allow embed domain %s: %w", d, err)
+		}
+	}
+	return nil
 }
 
 // GetVideo fetches status fields for one video.
 func (c *Client) GetVideo(ctx context.Context, vimeoID string) (*Video, error) {
 	var v Video
 	err := c.do(ctx, http.MethodGet,
-		"/videos/"+url.PathEscape(vimeoID)+"?fields=uri,name,link,duration,status,upload.status,transcode.status", nil, &v)
+		"/videos/"+url.PathEscape(vimeoID)+"?fields=uri,name,link,duration,status,upload.status,transcode.status,width,height,"+
+			"pictures.default_picture,pictures.sizes", nil, &v)
 	if err != nil {
 		return nil, err
 	}
@@ -185,4 +313,40 @@ func EmbedURL(vimeoID string, hash *string) string {
 	}
 	q.Set("dnt", "1")
 	return "https://player.vimeo.com/video/" + url.PathEscape(vimeoID) + "?" + q.Encode()
+}
+
+// Download is one size of a video file. Vimeo gives these signed, time-limited links to the video's owner.
+type Download struct {
+	Quality    string `json:"quality"`   // for example "source", "hd" or "sd"
+	Rendition  string `json:"rendition"` // for example "source", "1080p" or "720p"
+	PublicName string `json:"public_name"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	Size       int64  `json:"size"`
+	Link       string `json:"link"`
+	Expires    string `json:"expires"`
+}
+
+// Downloads lists the sizes of a video that the account can download.
+func (c *Client) Downloads(ctx context.Context, vimeoID string) ([]Download, error) {
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/videos/"+url.PathEscape(vimeoID)+"?fields=download", nil, &raw); err != nil {
+		return nil, err
+	}
+	// Vimeo sends [] instead of {} when none of the requested fields has a value: there is no download.
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 || string(body) == "[]" {
+		return []Download{}, nil
+	}
+	var v struct {
+		Download []Download `json:"download"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		msg := string(body)
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, fmt.Errorf("unexpected download response %q: %w", msg, err)
+	}
+	return v.Download, nil
 }

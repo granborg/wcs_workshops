@@ -39,6 +39,13 @@ func nullMs(t *time.Time) any {
 	return t.UnixMilli()
 }
 
+func nullInt(n *int) any {
+	if n == nil {
+		return nil
+	}
+	return *n
+}
+
 func nullStr(s *string) any {
 	if s == nil {
 		return nil

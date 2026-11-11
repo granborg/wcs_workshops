@@ -262,7 +262,8 @@ main.page {
   color: var(--p-text-muted-color);
 }
 
-.row .lead {
+/* Icon at the start of a list row or a table cell. */
+.lead {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -274,7 +275,7 @@ main.page {
   color: var(--p-primary-600);
 }
 
-.app-dark .row .lead {
+.app-dark .lead {
   background: color-mix(in srgb, var(--p-primary-400) 16%, transparent);
   color: var(--p-primary-300);
 }
@@ -393,10 +394,16 @@ a.p-button {
   border: 1px solid var(--p-content-border-color);
 }
 
+/*
+ * The player has the shape of the video: --ar is width divided by height (16:9 when it is not known).
+ * The width is limited so the player is at most 70% of the screen height: a portrait video fits on the screen.
+ */
 .player {
+  --ar: 1.7778;
   position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
+  width: min(100%, calc(70vh * var(--ar)));
+  margin: 0 auto;
+  aspect-ratio: var(--ar);
   background: #000;
   border-radius: var(--radius);
   overflow: hidden;

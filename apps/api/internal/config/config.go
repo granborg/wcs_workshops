@@ -43,6 +43,10 @@ func Load() (Config, error) {
 	if c.VimeoPrivacy != "unlisted" && c.VimeoPrivacy != "disable" {
 		return c, fmt.Errorf("VIMEO_PRIVACY must be unlisted or disable, got %q", c.VimeoPrivacy)
 	}
+	// With no allowed domain, a "disable" video plays nowhere, not even in this app.
+	if c.VimeoPrivacy == "disable" && len(c.VimeoEmbedDomains) == 0 {
+		return c, fmt.Errorf("VIMEO_PRIVACY=disable needs at least one domain in VIMEO_EMBED_DOMAINS")
+	}
 	return c, nil
 }
 

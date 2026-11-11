@@ -63,6 +63,7 @@ func (s *Server) routes() {
 	a := s.authed
 	m.Handle("GET /api/me", a(s.getMe))
 	m.Handle("PATCH /api/me", a(s.patchMe))
+	m.Handle("DELETE /api/me", a(s.deleteMe))
 
 	m.Handle("GET /api/library", a(s.listLibrary))
 	m.Handle("GET /api/library/{creatorId}", a(s.getLibraryTree))
@@ -77,6 +78,7 @@ func (s *Server) routes() {
 	m.Handle("POST /api/videos/{id}/complete", a(s.completeVideo))
 	m.Handle("GET /api/videos/{id}", a(s.getVideo))
 	m.Handle("GET /api/videos/{id}/playback", a(s.playback))
+	m.Handle("GET /api/videos/{id}/downloads", a(s.videoDownloads))
 	m.Handle("PATCH /api/videos/{id}", a(s.patchVideo))
 	m.Handle("DELETE /api/videos/{id}", a(s.deleteVideo))
 

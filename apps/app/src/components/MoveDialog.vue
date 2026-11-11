@@ -4,7 +4,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import type { DirectoryNode } from '@/types'
 import { api, errorMessage } from '@/services/api'
-import { findNode, flatten, subtreeIds } from '@/utils/tree'
+import { findNode, folderPaths, subtreeIds } from '@/utils/tree'
 import BaseDialog from './BaseDialog.vue'
 import FolderSelect from './FolderSelect.vue'
 
@@ -37,10 +37,9 @@ const options = computed(() => {
     const node = findNode(props.root, props.target.id)
     if (node) for (const id of subtreeIds(node)) excluded.add(id)
   }
-  return flatten(props.root).map((d) => ({
+  return folderPaths(props.root, props.creatorName).map((d) => ({
     id: d.id,
-    depth: d.depth,
-    label: d.depth === 0 ? props.creatorName : d.name,
+    label: d.path,
     disabled: excluded.has(d.id) || (!!props.allowed && !props.allowed.has(d.id)),
   }))
 })

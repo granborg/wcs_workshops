@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import RadioButton from 'primevue/radiobutton'
 import type { DirectoryNode } from '@/types'
 import { api, errorMessage } from '@/services/api'
-import { countVideos, flatten, subtreeIds } from '@/utils/tree'
+import { countVideos, folderPaths, subtreeIds } from '@/utils/tree'
 import BaseDialog from './BaseDialog.vue'
 import FolderSelect from './FolderSelect.vue'
 
@@ -22,9 +22,9 @@ const videoCount = computed(() => (props.node ? countVideos(props.node) : 0))
 const options = computed(() => {
   if (!props.node) return []
   const excluded = new Set(subtreeIds(props.node))
-  return flatten(props.root)
+  return folderPaths(props.root, props.creatorName)
     .filter((d) => !excluded.has(d.id))
-    .map((d) => ({ id: d.id, depth: d.depth, label: d.depth === 0 ? props.creatorName : d.name }))
+    .map((d) => ({ id: d.id, label: d.path }))
 })
 
 watch(

@@ -32,6 +32,23 @@ export function flatten(root: DirectoryNode, depth = 0): FlatDirectory[] {
   return out
 }
 
+export interface FolderPath extends FlatDirectory {
+  /** Full path from the root, for example "Ana / Season 1 / Week 1". The root shows as `rootName`. */
+  path: string
+}
+
+/** Pre-order flattening with the full path of each folder, for folder pickers. */
+export function folderPaths(root: DirectoryNode, rootName: string): FolderPath[] {
+  const out: FolderPath[] = []
+  const walk = (node: DirectoryNode, depth: number, parentPath: string | null) => {
+    const path = parentPath === null ? rootName : `${parentPath} / ${node.name}`
+    out.push({ id: node.id, name: node.name, depth, path })
+    for (const c of node.children) walk(c, depth + 1, path)
+  }
+  walk(root, 0, null)
+  return out
+}
+
 export function subtreeIds(node: DirectoryNode): string[] {
   const out = [node.id]
   for (const c of node.children) out.push(...subtreeIds(c))

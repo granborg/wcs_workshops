@@ -3,8 +3,8 @@ import Select from 'primevue/select'
 
 export interface FolderOption {
   id: string
+  /** Full path of the folder, for example "Ana / Season 1 / Week 1" (see folderPaths). */
   label: string
-  depth: number
   disabled?: boolean
 }
 
@@ -25,10 +25,25 @@ const model = defineModel<string>({ required: true })
     fluid
   >
     <template #option="{ option }">
-      <span :style="{ paddingLeft: `${option.depth * 16}px`, display: 'inline-flex', alignItems: 'center', gap: '8px' }">
+      <span class="folder-option">
         <i class="pi pi-folder muted" aria-hidden="true" />
-        {{ option.label }}
+        <span class="folder-path">{{ option.label }}</span>
       </span>
     </template>
   </Select>
 </template>
+
+<style scoped>
+.folder-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* A long path wraps in the list instead of making the overlay wider than the screen. */
+.folder-path {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+</style>

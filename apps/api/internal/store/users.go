@@ -60,6 +60,19 @@ func (s *Store) UpdateUser(ctx context.Context, id string, name, role *string) (
 	return s.GetUser(ctx, id)
 }
 
+// DeleteUserWithoutVideos deletes the user when they own no videos, and reports whether it did.
+// The check and the delete are one statement, so an upload that starts at the same time cannot slip between them.
+// Deleting the row cascades to the user's folders, QR codes, upload links, admin roles and access grants.
+func (s *Store) DeleteUserWithoutVideos(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM users WHERE id = ? AND NOT EXISTS (SELECT 1 FROM videos WHERE owner_id = ?)`, id, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // ListUsersByIDs returns the matching users ordered by name. Unknown ids are skipped.
 func (s *Store) ListUsersByIDs(ctx context.Context, ids []string) ([]model.User, error) {
 	if len(ids) == 0 {

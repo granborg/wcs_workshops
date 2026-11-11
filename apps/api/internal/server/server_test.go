@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/granborg/wcs_workshops/apps/api/internal/auth"
@@ -26,9 +28,12 @@ import (
 // Tokens are verified by a fake: the bearer token is the user's email address.
 // Vimeo is not configured, so upload endpoints are expected to answer 503.
 
-type fakeVerifier struct{}
+type fakeVerifier struct {
+	mu      sync.Mutex
+	deleted []string // auth uids passed to DeleteUser
+}
 
-func (fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, error) {
+func (*fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, error) {
 	if !strings.Contains(token, "@") {
 		return auth.Identity{}, errors.New("bad token")
 	}
@@ -36,10 +41,18 @@ func (fakeVerifier) Verify(_ context.Context, token string) (auth.Identity, erro
 	return auth.Identity{AuthUID: "fake:" + email, Email: &email, Name: strings.SplitN(email, "@", 2)[0]}, nil
 }
 
+func (f *fakeVerifier) DeleteUser(_ context.Context, authUID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, authUID)
+	return nil
+}
+
 type client struct {
 	t    *testing.T
 	base string
 	db   *sql.DB // for the few states the HTTP API cannot reach without Vimeo
+	auth *fakeVerifier
 }
 
 func newClient(t *testing.T) client {
@@ -53,10 +66,11 @@ func newClient(t *testing.T) client {
 		t.Fatalf("migrate: %v", err)
 	}
 	cfg := config.Config{VimeoPrivacy: "unlisted", CORSOrigins: []string{"http://localhost:5173"}}
-	srv := New(cfg, database, fakeVerifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	verifier := &fakeVerifier{}
+	srv := New(cfg, database, verifier, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return client{t: t, base: ts.URL, db: database}
+	return client{t: t, base: ts.URL, db: database, auth: verifier}
 }
 
 func (c client) do(user, method, path string, body, out any) (int, string) {
@@ -175,12 +189,89 @@ func TestPlaceholder(t *testing.T) {
 	}
 	c.expect(400, viewer, "GET", "/videos/"+v.ID+"/playback", nil)
 	c.expect(403, viewer, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
+	// Only the owner and admins can download, and only a video that has a file.
+	c.expect(404, viewer, "GET", "/videos/"+v.ID+"/downloads", nil)
+	c.expect(400, creator, "GET", "/videos/"+v.ID+"/downloads", nil)
 
 	c.expect(400, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 0})
 	c.expect(503, creator, "POST", "/videos/"+v.ID+"/upload-ticket", anyMap{"sizeBytes": 10})
 	c.must(creator, "GET", "/videos/"+v.ID, nil, &seen)
 	if seen.Status != model.StatusPlaceholder {
 		t.Fatalf("failed ticket changed status to %q", seen.Status)
+	}
+}
+
+// A video has an optional date. The creator sets it on create and changes or clears it later.
+func TestVideoDate(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+
+	c.expect(400, creator, "POST", "/videos/placeholder", anyMap{"title": "Bad", "directoryId": f.root, "videoDate": "2026-02-30"})
+	c.expect(400, creator, "POST", "/videos/placeholder", anyMap{"title": "Bad", "directoryId": f.root, "videoDate": ""})
+
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Dated", "directoryId": f.root, "videoDate": "2026-03-14"}, &v)
+	if v.VideoDate == nil || *v.VideoDate != "2026-03-14" {
+		t.Fatalf("videoDate = %v", v.VideoDate)
+	}
+	var undated model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Undated", "directoryId": f.root}, &undated)
+	if undated.VideoDate != nil {
+		t.Fatalf("videoDate = %q, want null", *undated.VideoDate)
+	}
+
+	c.expect(400, creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "14/03/2026"})
+	c.must(creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "2025-12-31"}, &v)
+	if v.VideoDate == nil || *v.VideoDate != "2025-12-31" || v.Title != "Dated" {
+		t.Fatalf("after patch: %+v", v)
+	}
+	c.must(creator, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": ""}, &v)
+	if v.VideoDate != nil {
+		t.Fatalf("after clear: videoDate = %q", *v.VideoDate)
+	}
+	c.expect(403, viewer, "PATCH", "/videos/"+v.ID, anyMap{"videoDate": "2025-12-31"})
+}
+
+// A user can delete their account. A creator must delete their videos first.
+func TestDeleteAccount(t *testing.T) {
+	c := newClient(t)
+	f := setup(t, c)
+
+	var v model.VideoSummary
+	c.must(creator, "POST", "/videos/placeholder", anyMap{"title": "Keep", "directoryId": f.week.ID}, &v)
+	var qr model.QrCodeInfo
+	c.must(creator, "POST", "/share", anyMap{"directoryId": f.season.ID}, &qr)
+	c.must(viewer, "POST", "/redeem", anyMap{"code": qr.Code}, nil)
+
+	c.expect(409, creator, "DELETE", "/me", nil)
+	if len(c.auth.deleted) != 0 {
+		t.Fatalf("sign-in account deleted while videos remain: %v", c.auth.deleted)
+	}
+	c.must(creator, "GET", "/library/"+f.me.ID, nil, nil) // nothing was removed
+
+	// A viewer can always delete. Their access grants go with them; the creator's collection stays.
+	c.expect(204, viewer, "DELETE", "/me", nil)
+	var grants int
+	if err := c.db.QueryRow(`SELECT COUNT(*) FROM access_grants`).Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if grants != 0 {
+		t.Fatalf("%d access grants left after the viewer was deleted", grants)
+	}
+
+	c.must(creator, "DELETE", "/videos/"+v.ID, nil, nil)
+	c.expect(204, creator, "DELETE", "/me", nil)
+	if !slices.Equal(c.auth.deleted, []string{"fake:" + viewer, "fake:" + creator}) {
+		t.Fatalf("deleted sign-in accounts = %v", c.auth.deleted)
+	}
+	for _, table := range []string{"users", "directories", "qr_codes"} {
+		var n int
+		if err := c.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("%d rows left in %s", n, table)
+		}
 	}
 }
 

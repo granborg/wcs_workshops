@@ -30,6 +30,11 @@ const file = ref<File | null>(null)
 const uploadError = ref<string | null>(null)
 const showLinkDialog = ref(false)
 const canManage = computed(() => video.value?.canManage ?? false)
+// Width divided by height, so the player has the shape of the video. Portrait videos are taller than wide.
+const aspect = computed(() => {
+  const v = video.value
+  return v?.width && v.height ? v.width / v.height : 16 / 9
+})
 const canUpload = computed(
   () => canManage.value && (uploading.value || ['placeholder', 'uploading', 'failed'].includes(video.value!.status)),
 )
@@ -80,7 +85,7 @@ onBeforeUnmount(() => {
 
   <Message v-if="error" severity="error" class="mb">{{ error }}</Message>
 
-  <div v-if="playback" class="player">
+  <div v-if="playback" class="player" :style="{ '--ar': aspect }">
     <iframe
       :src="playback.embedUrl"
       :title="video?.title ?? 'Video'"

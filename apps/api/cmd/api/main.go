@@ -18,6 +18,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "vimeo-privacy" {
+		os.Exit(runVimeoPrivacy(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "vimeo-downloads" {
+		os.Exit(runVimeoDownloads(os.Args[2:]))
+	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	cfg, err := config.Load()

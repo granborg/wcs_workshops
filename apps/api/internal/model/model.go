@@ -69,8 +69,16 @@ type Video struct {
 	VimeoHash   *string
 	Status      string
 	DurationSec *int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// VideoDate is the date the creator gives the video, as YYYY-MM-DD. Nil when not set.
+	VideoDate *string
+	// Width, Height and ThumbnailURL come from Vimeo when processing is done. MediaCheckedAt is the last time
+	// the app asked Vimeo for them.
+	Width          *int
+	Height         *int
+	ThumbnailURL   *string
+	MediaCheckedAt *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type QrCode struct {
@@ -148,7 +156,14 @@ type VideoSummary struct {
 	DirectoryID string `json:"directoryId"`
 	Status      string `json:"status"`
 	DurationSec *int   `json:"durationSec"`
-	CreatedAt   string `json:"createdAt"`
+	// VideoDate is the date the creator gives the video, as YYYY-MM-DD. Null when not set.
+	VideoDate *string `json:"videoDate"`
+	// Width and Height are the size of the video in pixels. Null until Vimeo has processed the video.
+	Width  *int `json:"width"`
+	Height *int `json:"height"`
+	// ThumbnailURL is a picture from the video on Vimeo's image server. Null until Vimeo has made one.
+	ThumbnailURL *string `json:"thumbnailUrl"`
+	CreatedAt    string  `json:"createdAt"`
 	// CanManage is set only by GET /videos/{id}: the signed-in user is the owner or an admin of the video.
 	CanManage bool `json:"canManage"`
 }
@@ -252,6 +267,17 @@ type UploadTicket struct {
 	UploadLink string `json:"uploadLink"`
 }
 
+// VideoDownload is one size of a video file, with a temporary download link from Vimeo.
+type VideoDownload struct {
+	// Label is what the app shows, for example "Original", "1080p" or "720p".
+	Label     string  `json:"label"`
+	Width     int     `json:"width"`
+	Height    int     `json:"height"`
+	SizeBytes int64   `json:"sizeBytes"`
+	URL       string  `json:"url"`
+	ExpiresAt *string `json:"expiresAt"`
+}
+
 type PlaybackInfo struct {
 	VideoID  string  `json:"videoId"`
 	VimeoID  string  `json:"vimeoId"`
@@ -269,13 +295,17 @@ type RedeemResult struct {
 // ToSummary converts a video row to its JSON shape.
 func (v Video) ToSummary() VideoSummary {
 	return VideoSummary{
-		ID:          v.ID,
-		OwnerID:     v.OwnerID,
-		Title:       v.Title,
-		DirectoryID: v.DirectoryID,
-		Status:      v.Status,
-		DurationSec: v.DurationSec,
-		CreatedAt:   ISO(v.CreatedAt),
+		ID:           v.ID,
+		OwnerID:      v.OwnerID,
+		Title:        v.Title,
+		DirectoryID:  v.DirectoryID,
+		Status:       v.Status,
+		DurationSec:  v.DurationSec,
+		VideoDate:    v.VideoDate,
+		Width:        v.Width,
+		Height:       v.Height,
+		ThumbnailURL: v.ThumbnailURL,
+		CreatedAt:    ISO(v.CreatedAt),
 	}
 }
 

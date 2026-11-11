@@ -20,9 +20,11 @@ type Identity struct {
 	Name    string
 }
 
-// Verifier turns a bearer token into an Identity.
+// Verifier turns a bearer token into an Identity, and deletes sign-in accounts.
 type Verifier interface {
 	Verify(ctx context.Context, idToken string) (Identity, error)
+	// DeleteUser removes the sign-in account with this uid. An account that does not exist is not an error.
+	DeleteUser(ctx context.Context, authUID string) error
 }
 
 // Firebase verifies Firebase ID tokens. It initialises lazily.
@@ -69,6 +71,18 @@ func (f *Firebase) Verify(ctx context.Context, idToken string) (Identity, error)
 		return Identity{}, err
 	}
 	return identityFromClaims(tok.UID, tok.Claims), nil
+}
+
+// DeleteUser removes the Firebase account. A missing account counts as deleted.
+func (f *Firebase) DeleteUser(ctx context.Context, authUID string) error {
+	f.once.Do(func() { f.init(ctx) })
+	if f.err != nil {
+		return fmt.Errorf("firebase not configured: %w", f.err)
+	}
+	if err := f.client.DeleteUser(ctx, authUID); err != nil && !fbauth.IsUserNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 func identityFromClaims(uid string, claims map[string]any) Identity {
