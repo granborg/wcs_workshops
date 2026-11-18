@@ -103,7 +103,7 @@ func (s *Server) routes() {
 	m.Handle("POST /api/redeem", a(s.redeem))
 	m.Handle("GET /api/audit", a(s.listAudit))
 
-	m.Handle("/", spaHandler(web.Dist))
+	m.Handle("/", spaHandler(web.Dist, s.linkPreview))
 	s.mux = m
 }
 

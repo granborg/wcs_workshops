@@ -10,8 +10,9 @@ import (
 )
 
 // spaHandler serves the embedded web app. Unknown paths fall back to index.html so Vue Router can
-// handle them. Unknown /api/ paths return JSON 404 instead.
-func spaHandler(dist fs.FS) http.Handler {
+// handle them. Unknown /api/ paths return JSON 404 instead. meta may name the page of a request, so a
+// link pasted in a chat app shows what it points to.
+func spaHandler(dist fs.FS, meta func(*http.Request) *pageMeta) http.Handler {
 	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
 		panic(err)
@@ -45,6 +46,10 @@ func spaHandler(dist fs.FS) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(index)
+		page := index
+		if meta != nil {
+			page = withMeta(index, meta(r))
+		}
+		_, _ = w.Write(page)
 	})
 }
